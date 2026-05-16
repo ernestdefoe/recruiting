@@ -5,8 +5,6 @@ namespace Ernestdefoe\Recruiting\Api\Controller;
 use Flarum\Settings\SettingsRepositoryInterface;
 use GuzzleHttp\Client;
 use GuzzleHttp\Exception\RequestException;
-use GuzzleHttp\Pool;
-use GuzzleHttp\Psr7\Request as GuzzleRequest;
 use Laminas\Diactoros\Response\JsonResponse;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
@@ -15,14 +13,15 @@ use Psr\Http\Server\RequestHandlerInterface;
 /**
  * GET /api/cfbd-recruits
  *
- * Proxies the College Football Data API recruiting/players endpoint.
- * Results are cached in Flarum's cache store for the configured duration.
+ * Proxies the College Football Data API recruiting/players endpoint and
+ * enriches each recruit with a headshot from On3's rankings page.
  *
- * Player headshots are fetched from On3's search page:
- *   https://www.on3.com/rivals/search/?query={name}
- * This endpoint returns real server-rendered HTML (no Cloudflare block)
- * and includes on3static.com image URLs directly in the search results.
- * Photos are cached independently per recruit for 7 days.
+ * Photo strategy:
+ *   Fetch https://www.on3.com/rivals/rankings/player/football/{year}/ once.
+ *   That page returns server-rendered HTML with 150 + players, each with a
+ *   profile href (/rivals/{slug}-{id}/) and an on3static.com image URL.
+ *   We build a name-slug → image-URL map and cache it for 24 hours.
+ *   One HTTP request per year covers all top recruits; no per-player scraping.
  *
  * Settings read (all under the ernestdefoe-recruiting.* namespace):
  *   api_key       — CFBD bearer token (required)
@@ -34,7 +33,7 @@ use Psr\Http\Server\RequestHandlerInterface;
 class RecruitingController implements RequestHandlerInterface
 {
     private const CFBD_BASE       = 'https://api.collegefootballdata.com';
-    private const ON3_SEARCH      = 'https://www.on3.com/rivals/search/';
+    private const ON3_RANKINGS    = 'https://www.on3.com/rivals/rankings/player/football/';
     private const ON3_STATIC_HOST = 'https://on3static.com';
 
     /** Browser-like UA so On3 serves full server-rendered HTML. */
@@ -76,9 +75,9 @@ class RecruitingController implements RequestHandlerInterface
                 fn () => $this->fetchFromCfbd($apiKey, $year, $team, $maxRecruits)
             );
 
-            // Enrich with On3 headshots — independent per-player cache so photos
-            // survive a main-list cache bust and only re-scrape when they expire.
-            $data = $this->enrichWithPhotos($data, $cache);
+            // Enrich with On3 headshots from the rankings page.
+            // The image map is cached separately so it survives a CFBD cache bust.
+            $data = $this->enrichWithPhotos($data, $cache, $year);
 
             return new JsonResponse([
                 'data' => $data,
@@ -195,58 +194,41 @@ class RecruitingController implements RequestHandlerInterface
         ];
     }
 
-    // ── On3 photo scraping ────────────────────────────────────────────────────
+    // ── On3 photo enrichment ──────────────────────────────────────────────────
 
     /**
-     * Enrich each recruit with a headshot URL from On3's search results page.
-     *
-     * On3's search endpoint returns server-rendered HTML (no JS required, no
-     * Cloudflare block) that already contains on3static.com image URLs in the
-     * result rows.  We scrape that page by name and extract the first player
-     * image we find, then cache it per recruit independently of the main list.
+     * Attach On3 headshot URLs to each recruit using the rankings page image map.
      */
-    private function enrichWithPhotos(array $recruits, $cache): array
+    private function enrichWithPhotos(array $recruits, $cache, string $year): array
     {
-        $resolved = []; // nameHash → URL|null
-        $toFetch  = []; // nameHash → playerName  (not yet in cache)
+        // Build (or hit cache for) the name-slug → image-URL map.
+        $imageMap = $cache->remember(
+            "ernestdefoe-recruiting.on3map.football.{$year}",
+            24 * 3600, // 24-hour TTL — rankings don't change hourly
+            fn () => $this->buildOn3ImageMap($year)
+        );
 
-        foreach ($recruits as $r) {
-            if (empty($r['name'])) {
-                continue;
-            }
-
-            $nameHash = md5(strtolower(trim((string) $r['name'])));
-            $cacheKey = "ernestdefoe-recruiting.photoon3.{$nameHash}";
-            $hit      = $cache->get($cacheKey);
-
-            if ($hit !== null) {
-                $resolved[$nameHash] = ($hit !== '') ? $hit : null;
-            } else {
-                $toFetch[$nameHash] = (string) $r['name'];
-            }
+        if (empty($imageMap)) {
+            return $recruits;
         }
 
-        if (!empty($toFetch)) {
-            $this->scrapeOn3Photos($toFetch, $resolved, $cache);
-        }
-
-        return array_map(function ($r) use ($resolved) {
-            $nameHash      = md5(strtolower(trim((string) ($r['name'] ?? ''))));
-            $r['photoUrl'] = $resolved[$nameHash] ?? null;
+        return array_map(function ($r) use ($imageMap) {
+            $slug = $this->nameToSlug((string) ($r['name'] ?? ''));
+            $r['photoUrl'] = $imageMap[$slug] ?? null;
             return $r;
         }, $recruits);
     }
 
     /**
-     * Concurrently fetch On3 search pages for each recruit and extract a photo URL.
+     * Fetch the On3 football rankings page for a given year and return a
+     * name-slug → image-URL map built from the server-rendered HTML.
      *
-     * @param  array  $namesToFetch  nameHash => playerName
-     * @param  array  &$resolved     nameHash => URL|null  (written into)
+     * Returns an empty array on any network or parse failure (graceful degradation).
      */
-    private function scrapeOn3Photos(array $namesToFetch, array &$resolved, $cache): void
+    private function buildOn3ImageMap(string $year): array
     {
         $client = new Client([
-            'timeout'         => 10,
+            'timeout'         => 12,
             'connect_timeout' => 5,
             'allow_redirects' => ['max' => 5],
             'http_errors'     => false,
@@ -258,135 +240,100 @@ class RecruitingController implements RequestHandlerInterface
             ],
         ]);
 
-        $requests = function () use ($namesToFetch) {
-            foreach ($namesToFetch as $nameHash => $name) {
-                yield $nameHash => new GuzzleRequest(
-                    'GET',
-                    self::ON3_SEARCH . '?' . http_build_query(['query' => $name])
-                );
-            }
-        };
+        try {
+            $response = $client->get(self::ON3_RANKINGS . $year . '/');
+        } catch (\Throwable $e) {
+            resolve('log')->warning('[recruiting] On3 rankings fetch failed', ['error' => $e->getMessage()]);
+            return [];
+        }
 
-        $pool = new Pool($client, $requests(), [
-            'concurrency' => 4, // stay gentle with On3
+        if ($response->getStatusCode() !== 200) {
+            resolve('log')->warning('[recruiting] On3 rankings HTTP ' . $response->getStatusCode());
+            return [];
+        }
 
-            'fulfilled' => function ($response, string $nameHash) use (&$resolved, $cache, $namesToFetch) {
-                $url        = null;
-                $playerName = $namesToFetch[$nameHash] ?? '';
+        $map = $this->parseOn3Rankings((string) $response->getBody());
 
-                if ($response->getStatusCode() === 200) {
-                    $url = $this->extractOn3Image((string) $response->getBody(), $playerName);
-                }
-
-                $resolved[$nameHash] = $url;
-                $ttl = $url ? (7 * 24 * 3600) : (24 * 3600);
-                $cache->put("ernestdefoe-recruiting.photoon3.{$nameHash}", $url ?? '', $ttl);
-            },
-
-            'rejected' => function ($reason, string $nameHash) use (&$resolved, $cache) {
-                $resolved[$nameHash] = null;
-                $cache->put("ernestdefoe-recruiting.photoon3.{$nameHash}", '', 3600);
-            },
+        resolve('log')->info('[recruiting] On3 image map built', [
+            'year'   => $year,
+            'players' => count($map),
         ]);
 
-        $pool->promise()->wait();
+        return $map;
     }
 
     /**
-     * Extract the player's headshot URL from an On3 search results page.
+     * Parse the On3 rankings HTML and return a name-slug → image-URL map.
      *
      * Strategy:
-     *  1. Collect all on3static.com player image positions in the page.
-     *  2. Collect all On3 profile-path positions (/rivals/... or /db/...).
-     *  3. Find the profile path that best matches the player's name slug.
-     *  4. Return the on3static image whose position is closest to that path.
-     *
-     * This avoids picking up featured/nav images that appear at the top of
-     * every On3 page (they were causing the "same image for all players" bug)
-     * while also being robust to HTML quote styles and Next.js data attributes.
-     *
-     * SVG files are skipped (those are team logos, not player headshots).
+     *  1. Collect all on3static.com player image positions.
+     *  2. Collect all /rivals/{name}-{id}/ profile-path positions.
+     *  3. For each unique profile path, find the closest image (≤ 5 000 chars).
+     *  4. Store as nameSlug → full CDN URL (cdn-cgi resize prefix stripped).
      */
-    private function extractOn3Image(string $html, string $playerName): ?string
+    private function parseOn3Rankings(string $html): array
     {
-        // Build URL slug: "Bryce Underwood" → "bryce-underwood"
-        $slug = strtolower(trim($playerName));
-        $slug = preg_replace('/[^a-z0-9]+/', '-', $slug);
-        $slug = trim($slug, '-');
-
-        // ── 1. All on3static player images ───────────────────────────────────
+        // All on3static player images (jpg/png/webp only — skip SVG logos).
         $imgPattern = '~https://on3static\.com(?:/cdn-cgi/image/[^\s"\'>\]]+)?'
                     . '(/uploads/assets/\d+/\d+/\d+\.(?:jpg|jpeg|png|webp))~i';
 
         preg_match_all($imgPattern, $html, $imgAll, PREG_OFFSET_CAPTURE);
 
-        if (empty($imgAll[0])) {
-            return null;
-        }
-
-        // ── 2. All On3 profile-path occurrences ───────────────────────────────
-        // Matches /rivals/{slug}-{id}/ or /db/{slug}-{id}/  anywhere in the HTML
-        // (href attributes, JSON data, Next.js __NEXT_DATA__, etc.)
+        // All /rivals/{name}-{id}/ profile paths anywhere in the page.
+        // Group 1 → name slug (e.g. "jared-curtis")
+        // Group 2 → numeric On3 ID (e.g. "159433")
         preg_match_all(
-            '~/(?:rivals|db)/([a-z0-9][a-z0-9\-]*)-(\d{4,})/~i',
+            '~/rivals/([a-z0-9][a-z0-9\-]+)-(\d{4,})/~i',
             $html,
             $hrefAll,
             PREG_OFFSET_CAPTURE
         );
 
-        if (empty($hrefAll[0])) {
-            return null;
+        if (empty($imgAll[0]) || empty($hrefAll[0])) {
+            return [];
         }
 
-        // ── 3. Find the profile path whose slug best matches the player ────────
-        $targetPos = null;
+        $map  = [];
+        $seen = [];
 
-        foreach ($hrefAll[0] as [$hrefStr, $hrefPos]) {
-            // $hrefAll[1] holds the slug portion captured by group 1.
-            // Re-derive it from the full match for simplicity.
-            if (preg_match('~/(?:rivals|db)/(' . preg_quote($slug, '~') . ')-\d+/~i', $hrefStr)) {
-                $targetPos = $hrefPos;
-                break;
+        foreach ($hrefAll[0] as $i => [, $hrefPos]) {
+            $nameSlug = $hrefAll[1][$i][0]; // e.g. "jared-curtis"
+
+            if (empty($nameSlug) || isset($seen[$nameSlug])) {
+                continue;
             }
-        }
 
-        // Fallback: try matching just the first two slug parts (handles "Jr.",
-        // missing suffixes, or minor slug differences between CFBD and On3).
-        if ($targetPos === null) {
-            $parts     = explode('-', $slug);
-            $shortSlug = implode('-', array_slice($parts, 0, 2));
+            $seen[$nameSlug] = true;
 
-            foreach ($hrefAll[0] as [$hrefStr, $hrefPos]) {
-                if (strlen($shortSlug) >= 5 &&
-                    stripos($hrefStr, '/' . $shortSlug . '-') !== false) {
-                    $targetPos = $hrefPos;
-                    break;
+            // Find the on3static image whose position is closest to this profile link.
+            $bestDist = PHP_INT_MAX;
+            $bestPath = null;
+
+            foreach ($imgAll[0] as $j => [, $imgPos]) {
+                $dist = abs($hrefPos - $imgPos);
+                if ($dist < $bestDist) {
+                    $bestDist = $dist;
+                    $bestPath = $imgAll[1][$j][0]; // captured path group
                 }
             }
-        }
 
-        if ($targetPos === null) {
-            return null;
-        }
-
-        // ── 4. Closest image to the matched profile path ──────────────────────
-        $bestImgFull = null;
-        $bestImgPath = null;
-        $bestDist    = PHP_INT_MAX;
-
-        foreach ($imgAll[0] as $i => [$imgFull, $imgPos]) {
-            $dist = abs($targetPos - $imgPos);
-            if ($dist < $bestDist) {
-                $bestDist    = $dist;
-                $bestImgFull = $imgFull;
-                $bestImgPath = $imgAll[1][$i][0]; // captured path group
+            if ($bestPath !== null && $bestDist < 5000) {
+                $map[$nameSlug] = self::ON3_STATIC_HOST . $bestPath;
             }
         }
 
-        if ($bestImgPath !== null && $bestDist < 8000) {
-            return self::ON3_STATIC_HOST . $bestImgPath;
-        }
+        return $map;
+    }
 
-        return null;
+    /**
+     * Normalise a full player name to an On3-compatible slug.
+     * "Jared Curtis" → "jared-curtis"
+     * "C.J. Stroud"  → "cj-stroud"
+     */
+    private function nameToSlug(string $name): string
+    {
+        $slug = strtolower(trim($name));
+        $slug = preg_replace('/[^a-z0-9]+/', '-', $slug);
+        return trim($slug, '-');
     }
 }
