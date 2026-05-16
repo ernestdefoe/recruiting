@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "recruiting-preview",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["serve", "-p", "5555", "-s", "preview"],
+      "port": 5555
+    }
+  ]
+}
