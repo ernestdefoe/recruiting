@@ -140,7 +140,7 @@ export default class RecruitingPage extends Page {
     return m('.GNPage-hero', [
       m('.GNPage-hero-inner', [
         m('h1.GNPage-title', [m('i.fas.fa-star'), ` ${this.title}${yearLabel}`]),
-        m('p.GNPage-subtitle', 'College Football Recruiting Rankings · Powered by CFBD'),
+        m('p.GNPage-subtitle', 'FBSFB Recruiting · College Football Rankings · Powered by CFBD'),
       ]),
     ]);
   }
@@ -156,13 +156,13 @@ export default class RecruitingPage extends Page {
     if (this.error === 'api_key_missing') {
       return m('.GNPage-state.GNPage-state--warn', [
         m('i.fas.fa-key'),
-        m('p', 'Set your CFBD API key in Admin → Extensions → GN Recruiting.'),
+        m('p', 'Set your CFBD API key in Admin → Extensions → FBSFB Recruiting.'),
       ]);
     }
     if (this.error === 'invalid_api_key') {
       return m('.GNPage-state.GNPage-state--warn', [
         m('i.fas.fa-exclamation-triangle'),
-        m('p', 'Invalid API key — check Admin → Extensions → GN Recruiting.'),
+        m('p', 'Invalid API key — check Admin → Extensions → FBSFB Recruiting.'),
       ]);
     }
     return m('.GNPage-state.GNPage-state--warn', [

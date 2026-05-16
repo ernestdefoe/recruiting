@@ -1,4 +1,4 @@
-# GN Recruiting
+# FBSFB Recruiting
 
 A Flarum 2 extension that pulls live college football recruiting rankings from the [College Football Data API](https://collegefootballdata.com/) and displays them on a dedicated `/recruiting` page inside your Flarum forum.
 
@@ -44,7 +44,7 @@ Then enable the extension in **Admin → Extensions**.
 
 ## Configuration
 
-All settings are found in **Admin → Extensions → GN Recruiting**.
+All settings are found in **Admin → Extensions → FBSFB Recruiting**.
 
 | Setting | Description | Default |
 |---|---|---|

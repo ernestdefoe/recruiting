@@ -16,7 +16,7 @@ ernestdefoe-recruiting:
     page:
       loading: "Loading recruits…"
       empty: "No recruits match your filters."
-      configure: "Set your CFBD API key in Admin → Extensions → GN Recruiting."
+      configure: "Set your CFBD API key in Admin → Extensions → FBSFB Recruiting."
       unavailable: "Recruiting data temporarily unavailable."
       all_positions: "All Positions"
       all_recruits: "All Recruits"

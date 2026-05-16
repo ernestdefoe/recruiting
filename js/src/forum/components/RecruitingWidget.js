@@ -86,7 +86,7 @@ export default class RecruitingWidget extends Component {
     if (this.error === 'api_key_missing') {
       return m('.GN-widget-empty', [
         m('i.fas.fa-key', { style: 'margin-right:6px' }),
-        'Set your CFBD API key in Admin → Extensions → GN Recruiting.',
+        'Set your CFBD API key in Admin → Extensions → FBSFB Recruiting.',
       ]);
     }
 
