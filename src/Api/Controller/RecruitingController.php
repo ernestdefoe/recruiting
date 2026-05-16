@@ -270,11 +270,12 @@ class RecruitingController implements RequestHandlerInterface
         $pool = new Pool($client, $requests(), [
             'concurrency' => 4, // stay gentle with On3
 
-            'fulfilled' => function ($response, string $nameHash) use (&$resolved, $cache) {
-                $url = null;
+            'fulfilled' => function ($response, string $nameHash) use (&$resolved, $cache, $namesToFetch) {
+                $url        = null;
+                $playerName = $namesToFetch[$nameHash] ?? '';
 
                 if ($response->getStatusCode() === 200) {
-                    $url = $this->extractOn3Image((string) $response->getBody());
+                    $url = $this->extractOn3Image((string) $response->getBody(), $playerName);
                 }
 
                 $resolved[$nameHash] = $url;
@@ -292,39 +293,50 @@ class RecruitingController implements RequestHandlerInterface
     }
 
     /**
-     * Extract the first player headshot URL from an On3 search results page.
+     * Extract the player's headshot URL from an On3 search results page.
      *
-     * On3 search results embed on3static.com image URLs in the HTML.
-     * We match the CDN pattern and strip the image-resize proxy prefix so we
-     * get the full-quality direct CDN URL.
+     * Strategy: find the player's unique profile href (e.g. /rivals/bryce-underwood-15949/)
+     * by matching their name slug, then look for an on3static.com image in the
+     * surrounding HTML.  This avoids picking up featured/nav images that appear
+     * at the top of every page and caused the "same image for all players" bug.
      *
-     * Pattern in HTML:
-     *   https://on3static.com/cdn-cgi/image/{params}/uploads/assets/{a}/{b}/{id}.{ext}
-     * We return:
-     *   https://on3static.com/uploads/assets/{a}/{b}/{id}.{ext}
-     *
+     * We strip the cdn-cgi resize proxy prefix to get the full-quality CDN URL.
      * SVG files are skipped (those are team logos, not player headshots).
      */
-    private function extractOn3Image(string $html): ?string
+    private function extractOn3Image(string $html, string $playerName): ?string
     {
-        // Match the cdn-cgi resized variant (most common in search results).
+        // Build URL slug from player name: "Bryce Underwood" → "bryce-underwood"
+        $slug = strtolower(trim($playerName));
+        $slug = preg_replace('/[^a-z0-9]+/', '-', $slug);
+        $slug = trim($slug, '-');
+
+        // Image CDN pattern — matches both cdn-cgi resized and direct variants.
+        $imgPattern = '~https://on3static\.com(?:/cdn-cgi/image/[^\s"\']+)?(/uploads/assets/\d+/\d+/\d+\.(?:jpg|jpeg|png|webp))~i';
+
+        // Find the player's profile href anchor in the search results.
+        // e.g. href="/rivals/bryce-underwood-15949/"
         if (preg_match(
-            '~https://on3static\.com/cdn-cgi/image/[^/\s"\']+(/uploads/assets/\d+/\d+/\d+\.(?:jpg|jpeg|png|webp))~i',
+            '~["\'](?:https://www\.on3\.com)?/rivals/' . preg_quote($slug, '~') . '-\d+/~i',
             $html,
-            $m
+            $anchor,
+            PREG_OFFSET_CAPTURE
         )) {
-            return self::ON3_STATIC_HOST . $m[1];
+            $pos = $anchor[0][1];
+
+            // Images in card markup typically sit before the href — check the
+            // 3 000 chars leading up to the profile link first.
+            $before = substr($html, max(0, $pos - 3000), min(3000, $pos));
+            if (preg_match($imgPattern, $before, $m)) {
+                return self::ON3_STATIC_HOST . $m[1];
+            }
+
+            // Fallback: check 2 000 chars after the profile link.
+            $after = substr($html, $pos, 2000);
+            if (preg_match($imgPattern, $after, $m)) {
+                return self::ON3_STATIC_HOST . $m[1];
+            }
         }
 
-        // Fallback: match a direct on3static URL (no resize proxy).
-        if (preg_match(
-            '~https://on3static\.com(/uploads/assets/\d+/\d+/\d+\.(?:jpg|jpeg|png|webp))~i',
-            $html,
-            $m
-        )) {
-            return self::ON3_STATIC_HOST . $m[1];
-        }
-
-        return null;
+        return null; // player not found in search results
     }
 }

@@ -246,17 +246,27 @@ export default class RecruitingPage extends Page {
           : null,
       ]),
 
-      // Photo — On3 search scrape; falls back to star-coloured initials avatar.
+      // Photo — On3 scrape when available; star-coloured initials as fallback.
+      // Initials are only rendered when there is no photoUrl so they never
+      // show through a loaded image.  onerror injects them back if the CDN
+      // request fails after the fact.
       m('.GNR-photoWrap', { 'data-stars': r.stars || 0 }, [
-        m('.GNR-initials', inits),
         r.photoUrl
           ? m('img.GNR-photo', {
               src:     r.photoUrl,
               alt:     r.name,
               loading: 'lazy',
-              onerror: function () { this.style.display = 'none'; },
+              onerror: (e) => {
+                e.target.style.display = 'none';
+                if (!e.target.parentElement.querySelector('.GNR-initials')) {
+                  const el = document.createElement('div');
+                  el.className = 'GNR-initials';
+                  el.textContent = inits;
+                  e.target.parentElement.prepend(el);
+                }
+              },
             })
-          : null,
+          : m('.GNR-initials', inits),
       ]),
 
       // Body — name, position, measurements, school info
