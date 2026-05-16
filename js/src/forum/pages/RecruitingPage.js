@@ -246,9 +246,17 @@ export default class RecruitingPage extends Page {
           : null,
       ]),
 
-      // Initials avatar — colour-coded by star rating.
+      // Photo — On3 search scrape; falls back to star-coloured initials avatar.
       m('.GNR-photoWrap', { 'data-stars': r.stars || 0 }, [
         m('.GNR-initials', inits),
+        r.photoUrl
+          ? m('img.GNR-photo', {
+              src:     r.photoUrl,
+              alt:     r.name,
+              loading: 'lazy',
+              onerror: function () { this.style.display = 'none'; },
+            })
+          : null,
       ]),
 
       // Body — name, position, measurements, school info

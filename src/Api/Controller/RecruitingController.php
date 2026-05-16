@@ -5,6 +5,8 @@ namespace Ernestdefoe\Recruiting\Api\Controller;
 use Flarum\Settings\SettingsRepositoryInterface;
 use GuzzleHttp\Client;
 use GuzzleHttp\Exception\RequestException;
+use GuzzleHttp\Pool;
+use GuzzleHttp\Psr7\Request as GuzzleRequest;
 use Laminas\Diactoros\Response\JsonResponse;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
@@ -16,6 +18,12 @@ use Psr\Http\Server\RequestHandlerInterface;
  * Proxies the College Football Data API recruiting/players endpoint.
  * Results are cached in Flarum's cache store for the configured duration.
  *
+ * Player headshots are fetched from On3's search page:
+ *   https://www.on3.com/rivals/search/?query={name}
+ * This endpoint returns real server-rendered HTML (no Cloudflare block)
+ * and includes on3static.com image URLs directly in the search results.
+ * Photos are cached independently per recruit for 7 days.
+ *
  * Settings read (all under the ernestdefoe-recruiting.* namespace):
  *   api_key       — CFBD bearer token (required)
  *   year          — recruiting class year (empty = current calendar year)
@@ -25,7 +33,14 @@ use Psr\Http\Server\RequestHandlerInterface;
  */
 class RecruitingController implements RequestHandlerInterface
 {
-    private const CFBD_BASE = 'https://api.collegefootballdata.com';
+    private const CFBD_BASE       = 'https://api.collegefootballdata.com';
+    private const ON3_SEARCH      = 'https://www.on3.com/rivals/search/';
+    private const ON3_STATIC_HOST = 'https://on3static.com';
+
+    /** Browser-like UA so On3 serves full server-rendered HTML. */
+    private const SCRAPE_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
+        . 'AppleWebKit/537.36 (KHTML, like Gecko) '
+        . 'Chrome/124.0.0.0 Safari/537.36';
 
     public function __construct(
         private SettingsRepositoryInterface $settings
@@ -49,7 +64,6 @@ class RecruitingController implements RequestHandlerInterface
 
         $year = $year ?: (string) date('Y');
 
-        // Deterministic cache key based on query parameters.
         $cacheKey = 'ernestdefoe-recruiting.' . md5("{$year}|{$team}|{$maxRecruits}");
 
         try {
@@ -61,6 +75,10 @@ class RecruitingController implements RequestHandlerInterface
                 $cacheMinutes * 60,
                 fn () => $this->fetchFromCfbd($apiKey, $year, $team, $maxRecruits)
             );
+
+            // Enrich with On3 headshots — independent per-player cache so photos
+            // survive a main-list cache bust and only re-scrape when they expire.
+            $data = $this->enrichWithPhotos($data, $cache);
 
             return new JsonResponse([
                 'data' => $data,
@@ -129,7 +147,6 @@ class RecruitingController implements RequestHandlerInterface
             return [];
         }
 
-        // Sort by national ranking ascending; unranked recruits go to the end.
         usort($raw, fn ($a, $b) => ($a['ranking'] ?? 99999) <=> ($b['ranking'] ?? 99999));
 
         return array_values(
@@ -174,6 +191,140 @@ class RecruitingController implements RequestHandlerInterface
             'school'      => $committedTo,
             'highSchool'  => $r['school']      ?? null,
             'recruitType' => $r['recruitType'] ?? 'HighSchool',
+            'photoUrl'    => null, // filled in by enrichWithPhotos()
         ];
+    }
+
+    // ── On3 photo scraping ────────────────────────────────────────────────────
+
+    /**
+     * Enrich each recruit with a headshot URL from On3's search results page.
+     *
+     * On3's search endpoint returns server-rendered HTML (no JS required, no
+     * Cloudflare block) that already contains on3static.com image URLs in the
+     * result rows.  We scrape that page by name and extract the first player
+     * image we find, then cache it per recruit independently of the main list.
+     */
+    private function enrichWithPhotos(array $recruits, $cache): array
+    {
+        $resolved = []; // nameHash → URL|null
+        $toFetch  = []; // nameHash → playerName  (not yet in cache)
+
+        foreach ($recruits as $r) {
+            if (empty($r['name'])) {
+                continue;
+            }
+
+            $nameHash = md5(strtolower(trim((string) $r['name'])));
+            $cacheKey = "ernestdefoe-recruiting.photoon3.{$nameHash}";
+            $hit      = $cache->get($cacheKey);
+
+            if ($hit !== null) {
+                $resolved[$nameHash] = ($hit !== '') ? $hit : null;
+            } else {
+                $toFetch[$nameHash] = (string) $r['name'];
+            }
+        }
+
+        if (!empty($toFetch)) {
+            $this->scrapeOn3Photos($toFetch, $resolved, $cache);
+        }
+
+        return array_map(function ($r) use ($resolved) {
+            $nameHash      = md5(strtolower(trim((string) ($r['name'] ?? ''))));
+            $r['photoUrl'] = $resolved[$nameHash] ?? null;
+            return $r;
+        }, $recruits);
+    }
+
+    /**
+     * Concurrently fetch On3 search pages for each recruit and extract a photo URL.
+     *
+     * @param  array  $namesToFetch  nameHash => playerName
+     * @param  array  &$resolved     nameHash => URL|null  (written into)
+     */
+    private function scrapeOn3Photos(array $namesToFetch, array &$resolved, $cache): void
+    {
+        $client = new Client([
+            'timeout'         => 10,
+            'connect_timeout' => 5,
+            'allow_redirects' => ['max' => 5],
+            'http_errors'     => false,
+            'headers'         => [
+                'User-Agent'      => self::SCRAPE_UA,
+                'Accept'          => 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                'Accept-Language' => 'en-US,en;q=0.9',
+                'Referer'         => 'https://www.on3.com/',
+            ],
+        ]);
+
+        $requests = function () use ($namesToFetch) {
+            foreach ($namesToFetch as $nameHash => $name) {
+                yield $nameHash => new GuzzleRequest(
+                    'GET',
+                    self::ON3_SEARCH . '?' . http_build_query(['query' => $name])
+                );
+            }
+        };
+
+        $pool = new Pool($client, $requests(), [
+            'concurrency' => 4, // stay gentle with On3
+
+            'fulfilled' => function ($response, string $nameHash) use (&$resolved, $cache) {
+                $url = null;
+
+                if ($response->getStatusCode() === 200) {
+                    $url = $this->extractOn3Image((string) $response->getBody());
+                }
+
+                $resolved[$nameHash] = $url;
+                $ttl = $url ? (7 * 24 * 3600) : (24 * 3600);
+                $cache->put("ernestdefoe-recruiting.photoon3.{$nameHash}", $url ?? '', $ttl);
+            },
+
+            'rejected' => function ($reason, string $nameHash) use (&$resolved, $cache) {
+                $resolved[$nameHash] = null;
+                $cache->put("ernestdefoe-recruiting.photoon3.{$nameHash}", '', 3600);
+            },
+        ]);
+
+        $pool->promise()->wait();
+    }
+
+    /**
+     * Extract the first player headshot URL from an On3 search results page.
+     *
+     * On3 search results embed on3static.com image URLs in the HTML.
+     * We match the CDN pattern and strip the image-resize proxy prefix so we
+     * get the full-quality direct CDN URL.
+     *
+     * Pattern in HTML:
+     *   https://on3static.com/cdn-cgi/image/{params}/uploads/assets/{a}/{b}/{id}.{ext}
+     * We return:
+     *   https://on3static.com/uploads/assets/{a}/{b}/{id}.{ext}
+     *
+     * SVG files are skipped (those are team logos, not player headshots).
+     */
+    private function extractOn3Image(string $html): ?string
+    {
+        // Match the cdn-cgi resized variant (most common in search results).
+        if (preg_match(
+            '~https://on3static\.com/cdn-cgi/image/[^/\s"\']+(/uploads/assets/\d+/\d+/\d+\.(?:jpg|jpeg|png|webp))~i',
+            $html,
+            $m
+        )) {
+            return self::ON3_STATIC_HOST . $m[1];
+        }
+
+        // Fallback: match a direct on3static URL (no resize proxy).
+        if (preg_match(
+            '~https://on3static\.com(/uploads/assets/\d+/\d+/\d+\.(?:jpg|jpeg|png|webp))~i',
+            $html,
+            $m
+        )) {
+            return self::ON3_STATIC_HOST . $m[1];
+        }
+
+        return null;
     }
 }

@@ -200,6 +200,7 @@
 // Initials avatar — colour-coded by star rating
 // 5★ gold · 4★ blue · 3★ green · 2★/unrated slate
 .GNR-photoWrap {
+  position: relative;
   width: 88px;
   height: 88px;
   margin: 18px auto 10px;
@@ -227,6 +228,15 @@
   color: rgba(255, 255, 255, 0.92);
   letter-spacing: 0.02em;
   user-select: none;
+}
+
+.GNR-photo {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: top center;
 }
 
 // Card body
