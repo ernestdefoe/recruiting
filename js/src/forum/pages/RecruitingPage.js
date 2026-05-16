@@ -246,17 +246,9 @@ export default class RecruitingPage extends Page {
           : null,
       ]),
 
-      // Photo — server-scraped ESPN og:image URL; initials avatar as fallback.
-      m('.GNR-photoWrap', [
+      // Initials avatar — colour-coded by star rating.
+      m('.GNR-photoWrap', { 'data-stars': r.stars || 0 }, [
         m('.GNR-initials', inits),
-        r.photoUrl
-          ? m('img.GNR-photo', {
-              src:     r.photoUrl,
-              alt:     r.name,
-              loading: 'lazy',
-              onerror: function () { this.style.display = 'none'; },
-            })
-          : null,
       ]),
 
       // Body — name, position, measurements, school info
