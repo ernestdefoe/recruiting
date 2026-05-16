@@ -22,7 +22,6 @@ export default class RecruitingPage extends Page {
 
     this.recruits  = [];
     this.year      = null;
-    this.title     = app.forum.attribute('ernestdefoe-recruiting.widget_title') || 'Top Recruits';
     this.loading   = true;
     this.error     = null;
     this._timer    = null;
@@ -58,7 +57,6 @@ export default class RecruitingPage extends Page {
         this.recruits = data.data  || [];
         this.year     = data.year  || null;
         this.error    = data.error || null;
-        if (data.title) this.title = data.title;
         this.loading  = false;
         m.redraw();
       })
@@ -139,7 +137,7 @@ export default class RecruitingPage extends Page {
     const yearLabel = this.year ? ` — ${this.year} Class` : '';
     return m('.GNPage-hero', [
       m('.GNPage-hero-inner', [
-        m('h1.GNPage-title', [m('i.fas.fa-star'), ` ${this.title}${yearLabel}`]),
+        m('h1.GNPage-title', [m('i.fas.fa-star'), ` Top Recruits${yearLabel}`]),
         m('p.GNPage-subtitle', 'FBSFB Recruiting · College Football Rankings · Powered by CFBD'),
       ]),
     ]);

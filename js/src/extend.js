@@ -35,19 +35,11 @@ export default [
       placeholder: 'e.g. Alabama',
     }))
 
-    // ── Widget display ───────────────────────────────────────────────────────
-    .setting(() => ({
-      setting:     'ernestdefoe-recruiting.widget_title',
-      label:       'Widget Title',
-      help:        'Heading shown at the top of the recruiting widget.',
-      type:        'text',
-      placeholder: 'Top Recruits',
-    }))
-
+    // ── Page display ─────────────────────────────────────────────────────────
     .setting(() => ({
       setting:     'ernestdefoe-recruiting.max_recruits',
       label:       'Max Recruits to Display',
-      help:        'Maximum number of recruits shown in the widget (1–100).',
+      help:        'Maximum number of recruits shown on the /recruiting page (1–100). Lower values reduce API response size and page load time.',
       type:        'number',
       placeholder: '25',
       min:         1,

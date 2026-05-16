@@ -52,13 +52,11 @@ class RecruitingController implements RequestHandlerInterface
         $team         = trim((string) $this->settings->get('ernestdefoe-recruiting.team', ''));
         $maxRecruits  = max(1, min(100, (int) $this->settings->get('ernestdefoe-recruiting.max_recruits', 25)));
         $cacheMinutes = max(1, (int) $this->settings->get('ernestdefoe-recruiting.cache_minutes', 360));
-        $widgetTitle  = trim((string) $this->settings->get('ernestdefoe-recruiting.widget_title', 'Top Recruits')) ?: 'Top Recruits';
 
         if (!$apiKey) {
             return new JsonResponse([
                 'data'  => [],
                 'year'  => (int) ($year ?: date('Y')),
-                'title' => $widgetTitle,
                 'error' => 'api_key_missing',
             ]);
         }
@@ -85,15 +83,13 @@ class RecruitingController implements RequestHandlerInterface
             $data = $this->enrichWithPhotos($data, $cache);
 
             return new JsonResponse([
-                'data'  => $data,
-                'year'  => (int) $year,
-                'title' => $widgetTitle,
+                'data' => $data,
+                'year' => (int) $year,
             ]);
         } catch (\RuntimeException $e) {
             return new JsonResponse([
                 'data'  => [],
                 'year'  => (int) $year,
-                'title' => $widgetTitle,
                 'error' => $e->getMessage(),
             ]);
         } catch (\Throwable $e) {
@@ -102,7 +98,6 @@ class RecruitingController implements RequestHandlerInterface
             return new JsonResponse([
                 'data'  => [],
                 'year'  => (int) $year,
-                'title' => $widgetTitle,
                 'error' => 'unexpected_error',
             ]);
         }
@@ -305,11 +300,12 @@ class RecruitingController implements RequestHandlerInterface
             'concurrency' => 8,
 
             'fulfilled' => function ($response, string $id) use (&$resolved, $cache) {
-                $url = null;
+                $url    = null;
+                $status = $response->getStatusCode();
+                $html   = (string) $response->getBody();
 
-                if ($response->getStatusCode() === 200) {
-                    $html = (string) $response->getBody();
-                    $url  = $this->extractOgImage($html);
+                if ($status === 200) {
+                    $url = $this->extractOgImage($html);
 
                     // 247Sports sometimes returns a generic placeholder — skip it.
                     if ($url && str_contains($url, 'default-player')) {
@@ -317,15 +313,28 @@ class RecruitingController implements RequestHandlerInterface
                     }
                 }
 
+                resolve('log')->debug(
+                    '[recruiting] photo247 fulfilled',
+                    [
+                        'id'         => $id,
+                        'httpStatus' => $status,
+                        'photoUrl'   => $url ?? 'none',
+                        // First 300 chars of body helps diagnose Cloudflare/bot blocks.
+                        'bodyPreview' => mb_substr($html, 0, 300),
+                    ]
+                );
+
                 $resolved[$id] = $url;
-                // Cache a real photo for 7 days; a miss for 24 h.
                 $ttl = $url ? (7 * 24 * 3600) : (24 * 3600);
                 $cache->put("ernestdefoe-recruiting.photo247.{$id}", $url ?? '', $ttl);
             },
 
             'rejected' => function ($reason, string $id) use (&$resolved, $cache) {
+                resolve('log')->warning(
+                    '[recruiting] photo247 rejected',
+                    ['id' => $id, 'reason' => (string) $reason]
+                );
                 $resolved[$id] = null;
-                // Cache the network failure briefly to avoid hammering 247Sports.
                 $cache->put("ernestdefoe-recruiting.photo247.{$id}", '', 3600);
             },
         ]);

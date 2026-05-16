@@ -31,9 +31,5 @@ return [
         ->default('ernestdefoe-recruiting.year',          '')
         ->default('ernestdefoe-recruiting.team',          '')
         ->default('ernestdefoe-recruiting.max_recruits',  '25')
-        ->default('ernestdefoe-recruiting.cache_minutes', '360')
-        ->default('ernestdefoe-recruiting.widget_title',  'Top Recruits')
-        // Expose non-sensitive settings to the forum bootstrap payload so the
-        // widget can read them without an extra HTTP round-trip.
-        ->serializeToForum('ernestdefoe-recruiting.widget_title', 'ernestdefoe-recruiting.widget_title'),
+        ->default('ernestdefoe-recruiting.cache_minutes', '360'),
 ];
