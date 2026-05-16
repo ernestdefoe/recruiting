@@ -2,13 +2,16 @@
 
 namespace Ernestdefoe\Recruiting\Api\Controller;
 
+use Flarum\Http\RequestUtil;
 use Flarum\Settings\SettingsRepositoryInterface;
 use GuzzleHttp\Client;
 use GuzzleHttp\Exception\RequestException;
+use Illuminate\Contracts\Cache\Repository as CacheRepository;
 use Laminas\Diactoros\Response\JsonResponse;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
 use Psr\Http\Server\RequestHandlerInterface;
+use Psr\Log\LoggerInterface;
 
 /**
  * GET /api/cfbd-recruits
@@ -22,6 +25,7 @@ use Psr\Http\Server\RequestHandlerInterface;
  *   profile href (/rivals/{slug}-{id}/) and an on3static.com image URL.
  *   We build a name-slug → image-URL map and cache it for 24 hours.
  *   One HTTP request per year covers all top recruits; no per-player scraping.
+ *   An empty map is NOT cached — it is retried on the next request.
  *
  * Settings read (all under the ernestdefoe-recruiting.* namespace):
  *   api_key       — CFBD bearer token (required)
@@ -42,11 +46,19 @@ class RecruitingController implements RequestHandlerInterface
         . 'Chrome/124.0.0.0 Safari/537.36';
 
     public function __construct(
-        private SettingsRepositoryInterface $settings
+        private SettingsRepositoryInterface $settings,
+        private CacheRepository             $cache,
+        private LoggerInterface             $log,
     ) {}
 
     public function handle(ServerRequestInterface $request): ResponseInterface
     {
+        // Require a logged-in user — guests have no business hitting this endpoint.
+        $actor = RequestUtil::getActor($request);
+        if ($actor->isGuest()) {
+            return new JsonResponse(['error' => 'unauthenticated'], 401);
+        }
+
         $apiKey       = trim((string) $this->settings->get('ernestdefoe-recruiting.api_key', ''));
         $year         = trim((string) $this->settings->get('ernestdefoe-recruiting.year', ''));
         $team         = trim((string) $this->settings->get('ernestdefoe-recruiting.team', ''));
@@ -61,15 +73,16 @@ class RecruitingController implements RequestHandlerInterface
             ]);
         }
 
+        // Sanitise year: must be a four-digit integer; fall back to current year.
         $year = $year ?: (string) date('Y');
+        if (!preg_match('/^\d{4}$/', $year)) {
+            $year = (string) date('Y');
+        }
 
         $cacheKey = 'ernestdefoe-recruiting.' . md5("{$year}|{$team}|{$maxRecruits}");
 
         try {
-            /** @var \Illuminate\Contracts\Cache\Repository $cache */
-            $cache = resolve('cache.store');
-
-            $data = $cache->remember(
+            $data = $this->cache->remember(
                 $cacheKey,
                 $cacheMinutes * 60,
                 fn () => $this->fetchFromCfbd($apiKey, $year, $team, $maxRecruits)
@@ -77,7 +90,7 @@ class RecruitingController implements RequestHandlerInterface
 
             // Enrich with On3 headshots from the rankings page.
             // The image map is cached separately so it survives a CFBD cache bust.
-            $data = $this->enrichWithPhotos($data, $cache, $year);
+            $data = $this->enrichWithPhotos($data, $year);
 
             return new JsonResponse([
                 'data' => $data,
@@ -90,7 +103,7 @@ class RecruitingController implements RequestHandlerInterface
                 'error' => $e->getMessage(),
             ]);
         } catch (\Throwable $e) {
-            resolve('log')->error('[recruiting] RecruitingController: ' . $e->getMessage(), ['exception' => $e]);
+            $this->log->error('[recruiting] RecruitingController: ' . $e->getMessage(), ['exception' => $e]);
 
             return new JsonResponse([
                 'data'  => [],
@@ -199,14 +212,21 @@ class RecruitingController implements RequestHandlerInterface
     /**
      * Attach On3 headshot URLs to each recruit using the rankings page image map.
      */
-    private function enrichWithPhotos(array $recruits, $cache, string $year): array
+    private function enrichWithPhotos(array $recruits, string $year): array
     {
-        // Build (or hit cache for) the name-slug → image-URL map.
-        $imageMap = $cache->remember(
-            "ernestdefoe-recruiting.on3map.football.{$year}",
-            24 * 3600, // 24-hour TTL — rankings don't change hourly
-            fn () => $this->buildOn3ImageMap($year)
-        );
+        $cacheKey = "ernestdefoe-recruiting.on3map.football.{$year}";
+
+        // Use get/put instead of remember so we can skip caching an empty map.
+        // An empty map means the On3 fetch failed; we want to retry next time.
+        $imageMap = $this->cache->get($cacheKey);
+
+        if ($imageMap === null) {
+            $imageMap = $this->buildOn3ImageMap($year);
+
+            if (!empty($imageMap)) {
+                $this->cache->put($cacheKey, $imageMap, 24 * 3600); // 24-hour TTL
+            }
+        }
 
         if (empty($imageMap)) {
             return $recruits;
@@ -243,19 +263,19 @@ class RecruitingController implements RequestHandlerInterface
         try {
             $response = $client->get(self::ON3_RANKINGS . $year . '/');
         } catch (\Throwable $e) {
-            resolve('log')->warning('[recruiting] On3 rankings fetch failed', ['error' => $e->getMessage()]);
+            $this->log->warning('[recruiting] On3 rankings fetch failed', ['error' => $e->getMessage()]);
             return [];
         }
 
         if ($response->getStatusCode() !== 200) {
-            resolve('log')->warning('[recruiting] On3 rankings HTTP ' . $response->getStatusCode());
+            $this->log->warning('[recruiting] On3 rankings HTTP ' . $response->getStatusCode());
             return [];
         }
 
         $map = $this->parseOn3Rankings((string) $response->getBody());
 
-        resolve('log')->info('[recruiting] On3 image map built', [
-            'year'   => $year,
+        $this->log->info('[recruiting] On3 image map built', [
+            'year'    => $year,
             'players' => count($map),
         ]);
 

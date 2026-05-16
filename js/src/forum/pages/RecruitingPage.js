@@ -9,7 +9,7 @@ import Page from 'flarum/common/components/Page';
  *
  * Features:
  *  - Responsive card grid (auto-fill, 220 px min per card)
- *  - ESPN headshot via CFBD athleteId; falls back to coloured initials avatar
+ *  - On3 headshot; falls back to star-tier coloured initials avatar
  *  - Client-side filter: keyword search · position · commitment status
  *  - Auto-refresh every 30 minutes
  */
@@ -26,16 +26,21 @@ export default class RecruitingPage extends Page {
     this.error     = null;
     this._timer    = null;
 
+    // Tracks photo IDs that failed to load so we render initials instead,
+    // without mutating the DOM outside of Mithril's vdom.
+    this._brokenPhotos = new Set();
+
     // Client-side filter state
     this.filterSearch   = '';
     this.filterPosition = '';
     this.filterStatus   = 'all'; // 'all' | 'committed' | 'undecided'
-
-    this.fetch();
   }
 
   oncreate(vnode) {
     super.oncreate(vnode);
+    // Fetch here (not oninit) so the component is guaranteed to be mounted
+    // before the first redraw triggered by a resolved fetch.
+    this.fetch();
     // Recruiting data changes rarely — refresh every 30 minutes.
     this._timer = setInterval(() => this.fetch(), 30 * 60_000);
   }
@@ -54,10 +59,11 @@ export default class RecruitingPage extends Page {
     fetch(`${base}/cfbd-recruits`, { credentials: 'same-origin' })
       .then((r) => r.json())
       .then((data) => {
-        this.recruits = data.data  || [];
-        this.year     = data.year  || null;
-        this.error    = data.error || null;
-        this.loading  = false;
+        this.recruits      = data.data  || [];
+        this.year          = data.year  || null;
+        this.error         = data.error || null;
+        this.loading       = false;
+        this._brokenPhotos = new Set(); // reset on fresh data
         m.redraw();
       })
       .catch(() => {
@@ -69,12 +75,17 @@ export default class RecruitingPage extends Page {
 
   // ── Helpers ─────────────────────────────────────────────────────────────────
 
-  /** Unique sorted position list derived from loaded data. */
+  /** Unique sorted position list derived from loaded data — no side-effects. */
   positions() {
-    const seen = new Set();
-    return this.recruits
-      .map((r) => r.position)
-      .filter((p) => p && !seen.has(p) && seen.add(p));
+    const seen   = new Set();
+    const result = [];
+    for (const r of this.recruits) {
+      if (r.position && !seen.has(r.position)) {
+        seen.add(r.position);
+        result.push(r.position);
+      }
+    }
+    return result;
   }
 
   /** Apply all active client-side filters. */
@@ -137,7 +148,7 @@ export default class RecruitingPage extends Page {
     const yearLabel = this.year ? ` — ${this.year} Class` : '';
     return m('.GNPage-hero', [
       m('.GNPage-hero-inner', [
-        m('h1.GNPage-title', [m('i.fas.fa-star'), ` Top Recruits${yearLabel}`]),
+        m('h1.GNPage-title', [m('i.fa-solid.fa-star'), ` Top Recruits${yearLabel}`]),
         m('p.GNPage-subtitle', 'FBSFB Recruiting · College Football Rankings · Powered by CFBD'),
       ]),
     ]);
@@ -145,7 +156,7 @@ export default class RecruitingPage extends Page {
 
   viewLoading() {
     return m('.GNPage-state', [
-      m('i.fas.fa-spinner.fa-spin'),
+      m('i.fa-solid.fa-spinner.fa-spin'),
       m('p', 'Loading recruits…'),
     ]);
   }
@@ -153,27 +164,29 @@ export default class RecruitingPage extends Page {
   viewError() {
     if (this.error === 'api_key_missing') {
       return m('.GNPage-state.GNPage-state--warn', [
-        m('i.fas.fa-key'),
+        m('i.fa-solid.fa-key'),
         m('p', 'Set your CFBD API key in Admin → Extensions → FBSFB Recruiting.'),
       ]);
     }
     if (this.error === 'invalid_api_key') {
       return m('.GNPage-state.GNPage-state--warn', [
-        m('i.fas.fa-exclamation-triangle'),
+        m('i.fa-solid.fa-triangle-exclamation'),
         m('p', 'Invalid API key — check Admin → Extensions → FBSFB Recruiting.'),
       ]);
     }
     return m('.GNPage-state.GNPage-state--warn', [
-      m('i.fas.fa-exclamation-circle'),
+      m('i.fa-solid.fa-circle-exclamation'),
       m('p', 'Recruiting data is temporarily unavailable. Please try again later.'),
     ]);
   }
 
   viewContent() {
     const recruits  = this.filtered();
-    const committed = this.recruits.filter((r) => r.status === 'committed').length;
-    const avgRating = this.recruits.length
-      ? (this.recruits.reduce((s, r) => s + (r.rating || 0), 0) / this.recruits.length).toFixed(4)
+
+    // Stats are derived from the filtered list so every number is consistent.
+    const committed = recruits.filter((r) => r.status === 'committed').length;
+    const avgRating = recruits.length
+      ? (recruits.reduce((s, r) => s + (r.rating || 0), 0) / recruits.length).toFixed(4)
       : null;
 
     return [
@@ -186,7 +199,7 @@ export default class RecruitingPage extends Page {
       ]),
 
       recruits.length === 0
-        ? m('.GNPage-state', [m('i.fas.fa-search'), m('p', 'No recruits match your filters.')])
+        ? m('.GNPage-state', [m('i.fa-solid.fa-magnifying-glass'), m('p', 'No recruits match your filters.')])
         : m('.GNPage-grid', recruits.map((r) => this.viewCard(r))),
     ];
   }
@@ -196,7 +209,7 @@ export default class RecruitingPage extends Page {
 
     return m('.GNPage-filters', [
       m('div.GNPage-search-wrap', [
-        m('i.fas.fa-search.GNPage-search-icon'),
+        m('i.fa-solid.fa-magnifying-glass.GNPage-search-icon'),
         m('input.GNPage-search', {
           type:        'text',
           placeholder: 'Search name, school, city…',
@@ -230,8 +243,12 @@ export default class RecruitingPage extends Page {
     const starsStr  = this.stars(r.stars);
     const inits     = this.initials(r.name);
     const physicals = [r.height, r.weight].filter(Boolean).join(' · ');
+    const photoKey  = r.id || r.name;
 
-    return m('.GNR-card', { key: r.id || r.name }, [
+    // Show initials if there is no photoUrl, or if the image previously failed.
+    const showInitials = !r.photoUrl || this._brokenPhotos.has(photoKey);
+
+    return m('.GNR-card', { key: photoKey }, [
 
       // Top bar — national rank + stars + numerical rating
       m('.GNR-top', [
@@ -247,26 +264,20 @@ export default class RecruitingPage extends Page {
       ]),
 
       // Photo — On3 scrape when available; star-coloured initials as fallback.
-      // Initials are only rendered when there is no photoUrl so they never
-      // show through a loaded image.  onerror injects them back if the CDN
-      // request fails after the fact.
+      // onerror updates component state and triggers a Mithril redraw so the
+      // broken image is replaced via the vdom rather than raw DOM mutation.
       m('.GNR-photoWrap', { 'data-stars': r.stars || 0 }, [
-        r.photoUrl
-          ? m('img.GNR-photo', {
+        showInitials
+          ? m('.GNR-initials', inits)
+          : m('img.GNR-photo', {
               src:     r.photoUrl,
               alt:     r.name,
               loading: 'lazy',
-              onerror: (e) => {
-                e.target.style.display = 'none';
-                if (!e.target.parentElement.querySelector('.GNR-initials')) {
-                  const el = document.createElement('div');
-                  el.className = 'GNR-initials';
-                  el.textContent = inits;
-                  e.target.parentElement.prepend(el);
-                }
+              onerror: () => {
+                this._brokenPhotos.add(photoKey);
+                m.redraw();
               },
-            })
-          : m('.GNR-initials', inits),
+            }),
       ]),
 
       // Body — name, position, measurements, school info
@@ -282,12 +293,12 @@ export default class RecruitingPage extends Page {
           : null,
 
         r.highSchool
-          ? m('.GNR-detail', [m('i.fas.fa-school'), ' ', r.highSchool])
+          ? m('.GNR-detail', [m('i.fa-solid.fa-school'), ' ', r.highSchool])
           : null,
 
         r.hometown
           ? m('.GNR-detail', [
-              m('i.fas.fa-map-marker-alt'),
+              m('i.fa-solid.fa-location-dot'),
               ' ',
               r.hometown,
               r.country ? m('span.GNR-country', ` · ${r.country}`) : null,
@@ -303,11 +314,11 @@ export default class RecruitingPage extends Page {
       m('.GNR-footer', [
         r.status === 'committed'
           ? m('span.GNR-commit.GNR-commit--committed', [
-              m('i.fas.fa-check-circle'),
+              m('i.fa-solid.fa-circle-check'),
               ` ${r.school || 'Committed'}`,
             ])
           : m('span.GNR-commit.GNR-commit--undecided', [
-              m('i.far.fa-circle'),
+              m('i.fa-regular.fa-circle'),
               ' Undecided',
             ]),
       ]),

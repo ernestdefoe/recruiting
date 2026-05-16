@@ -26,7 +26,7 @@
             "title": "FBSFB Recruiting",
             "category": "feature",
             "icon": {
-                "name": "fas fa-star",
+                "name": "fa-solid fa-star",
                 "backgroundColor": "#B22222",
                 "color": "#fff"
             }
@@ -34,5 +34,7 @@
     },
     "config": {
         "sort-packages": true
-    }
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true
 }

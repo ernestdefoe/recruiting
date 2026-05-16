@@ -337,13 +337,8 @@
 }
 
 // ── Dark mode overrides ───────────────────────────────────────────────────────
-@media (prefers-color-scheme: dark) {
-  .GNR-commit--committed {
-    background: rgba(78, 196, 106, 0.18);
-    color: #5dda7a;
-  }
-}
-
+// Flarum 2 toggles body.App--dark-mode rather than honouring the OS media
+// query, so we scope dark overrides here only (avoids double-application).
 body.App--dark-mode {
   .GNR-commit--committed {
     background: rgba(78, 196, 106, 0.18);

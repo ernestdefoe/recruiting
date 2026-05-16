@@ -15,7 +15,7 @@ app.initializers.add('ernestdefoe-recruiting', () => {
       'ernestdefoe-recruiting',
       m(LinkButton, {
         href: app.route('recruiting'),
-        icon: 'fas fa-star',
+        icon: 'fa-solid fa-star',
       }, app.translator.trans('ernestdefoe-recruiting.forum.nav.label')),
       -10
     );
