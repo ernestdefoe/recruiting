@@ -1,0 +1,203 @@
+// ============================================================
+// GN Recruiting — Forum Styles
+// Provides the full .GN-widget + .GN-recruit card stack so the
+// widget is self-contained and works with OR without the fbsfb
+// Avocado theme.  When fbsfb is also installed these rules are
+// effectively identical to the ones it already defines, so there
+// is no visual conflict.
+// ============================================================
+
+// ── Sidebar container (standalone fallback) ───────────────────────────────────
+// When fbsfb is NOT installed the widget is injected into a new
+// .GN-widgetSidebar div that this extension creates inside
+// .sideNavContainer.  Give it the same flex + sticky treatment.
+.IndexPage .sideNavContainer {
+  display: flex;
+  align-items: flex-start;
+  gap: 1.5rem;
+}
+
+.IndexPage .GN-widgetSidebar {
+  width: 280px;
+  flex-shrink: 0;
+  position: sticky;
+  top: 1rem;
+}
+
+@media (max-width: 900px) {
+  .IndexPage .GN-widgetSidebar {
+    display: none;
+  }
+}
+
+// ── Shared widget chrome ──────────────────────────────────────────────────────
+.GN-widget {
+  background: var(--body-bg, #fff);
+  border-radius: var(--border-radius, 14px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.07), 0 1px 3px rgba(0, 0, 0, 0.04);
+  border: 1px solid var(--border-color, rgba(0, 0, 0, 0.07));
+  overflow: hidden;
+  margin-bottom: 12px;
+}
+
+.GN-widget-header {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 11px 14px 9px;
+  font-weight: 700;
+  font-size: 0.78rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted-color, #9fa0ab);
+  border-bottom: 1px solid var(--border-color, rgba(0, 0, 0, 0.07));
+
+  i { font-size: 0.85em; }
+}
+
+.GN-widget-body {
+  padding: 6px 0;
+}
+
+.GN-widget-loading,
+.GN-widget-empty {
+  padding: 14px;
+  text-align: center;
+  font-size: 0.82rem;
+  color: var(--muted-color, #9fa0ab);
+}
+
+// ── Recruiting widget header year tag ─────────────────────────────────────────
+.GN-recruitingWidget-year {
+  font-size: 0.8em;
+  opacity: 0.7;
+}
+
+// ── Recruit card ──────────────────────────────────────────────────────────────
+.GN-recruit {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--border-color, rgba(0, 0, 0, 0.06));
+  min-height: 48px;
+
+  &:last-child { border-bottom: none; }
+  &:hover { background: var(--control-bg, #f8f8fa); }
+}
+
+// Left column: ranking + position badges stacked
+.GN-recruit-badges {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  flex-shrink: 0;
+  min-width: 32px;
+}
+
+.GN-recruit-rank {
+  font-size: 0.65rem;
+  font-weight: 800;
+  color: var(--muted-color, #9fa0ab);
+  line-height: 1;
+}
+
+.GN-recruit-pos {
+  background: var(--primary-color, #B22222);
+  color: #fff;
+  font-size: 0.6rem;
+  font-weight: 800;
+  padding: 2px 5px;
+  border-radius: 4px;
+  letter-spacing: 0.03em;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+// Centre: info block
+.GN-recruit-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.GN-recruit-name {
+  font-weight: 700;
+  font-size: 0.82rem;
+  color: var(--body-color, #22232a);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.GN-recruit-meta {
+  font-size: 0.72rem;
+  color: var(--muted-color, #9fa0ab);
+  margin-top: 1px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.GN-recruit-stars {
+  font-size: 0.68rem;
+  color: var(--primary-color, #B22222);
+  margin-top: 2px;
+  letter-spacing: 0.5px;
+}
+
+.GN-recruit-rating {
+  font-size: 0.65rem;
+  color: var(--muted-color, #9fa0ab);
+  font-weight: 500;
+}
+
+// Right: commitment pill
+.GN-recruit-commit {
+  font-size: 0.65rem;
+  font-weight: 700;
+  padding: 3px 7px;
+  border-radius: 20px;
+  white-space: nowrap;
+  flex-shrink: 0;
+  letter-spacing: 0.02em;
+
+  &--committed {
+    background: rgba(78, 196, 106, 0.15);
+    color: #2e7d40;
+  }
+
+  &--undecided {
+    background: rgba(159, 160, 171, 0.15);
+    color: var(--muted-color, #9fa0ab);
+  }
+
+  &--decommitted {
+    background: rgba(226, 87, 74, 0.12);
+    color: #b03020;
+  }
+}
+
+// ── Dark mode ─────────────────────────────────────────────────────────────────
+// Variable-based rules above already adapt; add explicit tweaks where needed.
+@media (prefers-color-scheme: dark) {
+  .GN-recruit-commit--committed {
+    background: rgba(78, 196, 106, 0.18);
+    color: #5dda7a;
+  }
+  .GN-recruit-commit--decommitted {
+    background: rgba(226, 87, 74, 0.18);
+    color: #e57060;
+  }
+}
+
+body.App--dark-mode {
+  .GN-recruit-commit--committed {
+    background: rgba(78, 196, 106, 0.18);
+    color: #5dda7a;
+  }
+  .GN-recruit-commit--decommitted {
+    background: rgba(226, 87, 74, 0.18);
+    color: #e57060;
+  }
+}

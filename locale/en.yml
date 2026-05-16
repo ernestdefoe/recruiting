@@ -1,0 +1,18 @@
+ernestdefoe-recruiting:
+  admin:
+    settings:
+      api_key_label: "College Football Data API Key"
+      api_key_help: "Get your free bearer token at collegefootballdata.com"
+      year_label: "Recruiting Year"
+      year_help: "Leave blank to always display the current calendar year."
+      team_label: "Team Filter"
+      team_help: "Filter by committed/recruiting team. Leave blank for national top recruits."
+      widget_title_label: "Widget Title"
+      max_recruits_label: "Max Recruits to Display"
+      cache_minutes_label: "Cache Duration (minutes)"
+  forum:
+    widget:
+      loading: "Loading…"
+      empty: "No recruits found."
+      configure: "Set your CFBD API key in Admin → Extensions → GN Recruiting."
+      unavailable: "Recruiting data unavailable."
