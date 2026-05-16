@@ -18,8 +18,9 @@ use Psr\Http\Server\RequestHandlerInterface;
  * Proxies the College Football Data API recruiting/players endpoint.
  * Results are cached in Flarum's cache store for the configured duration.
  *
- * Player headshots are scraped from ESPN recruit profile pages (og:image)
- * and cached individually per athlete for 7 days so the scraping only
+ * Player headshots are scraped from 247Sports recruit profile pages (og:image)
+ * using the 247Sports recruit ID that CFBD includes in its response.
+ * Photos are cached individually per recruit for 7 days so scraping only
  * happens on first encounter.
  *
  * Settings read (all under the ernestdefoe-recruiting.* namespace):
@@ -32,10 +33,10 @@ use Psr\Http\Server\RequestHandlerInterface;
  */
 class RecruitingController implements RequestHandlerInterface
 {
-    private const CFBD_BASE    = 'https://api.collegefootballdata.com';
-    private const ESPN_RECRUIT = 'https://www.espn.com/college-sports/recruiting/football/player/_/id/';
+    private const CFBD_BASE      = 'https://api.collegefootballdata.com';
+    private const SPORTS247_BASE = 'https://247sports.com/player/';
 
-    /** Browser-like UA so ESPN serves the full server-rendered HTML. */
+    /** Browser-like UA so 247Sports serves the full server-rendered HTML. */
     private const SCRAPE_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
         . 'AppleWebKit/537.36 (KHTML, like Gecko) '
         . 'Chrome/124.0.0.0 Safari/537.36';
@@ -205,75 +206,97 @@ class RecruitingController implements RequestHandlerInterface
     // ── Photo scraping ────────────────────────────────────────────────────────
 
     /**
-     * Enrich each recruit with a headshot URL scraped from their ESPN recruit
-     * profile page.  Each athlete's photo URL is cached independently for 7 days
-     * so re-scraping only happens when individual entries expire.
+     * Enrich each recruit with a headshot URL scraped from their 247Sports
+     * profile page.  The CFBD recruit `id` IS the 247Sports recruit ID, so
+     * we can build the profile URL directly.
      *
+     * Each photo is cached independently for 7 days (24 h on miss, 1 h on
+     * network error) so re-scraping only happens when individual entries expire.
      * Requests are sent concurrently (up to 8 at a time) to keep latency low.
      */
     private function enrichWithPhotos(array $recruits, $cache): array
     {
-        // Separate recruits that have an athleteId and need photo resolution.
-        $withId = array_filter($recruits, fn ($r) => !empty($r['athleteId']));
+        // Only recruits with an `id` (the 247Sports recruit ID) can be resolved.
+        $withId = array_filter($recruits, fn ($r) => !empty($r['id']));
 
         if (empty($withId)) {
             return $recruits;
         }
 
-        $resolved = []; // athleteId → URL|null
-        $toFetch  = []; // athleteId values not yet in cache
+        $resolved = []; // id → URL|null
+        $toFetch  = []; // ['id' => …, 'name' => …] entries not yet in cache
 
         foreach ($withId as $r) {
-            $id  = $r['athleteId'];
-            $key = "ernestdefoe-recruiting.photo.{$id}";
+            $id  = (string) $r['id'];
+            $key = "ernestdefoe-recruiting.photo247.{$id}";
             $hit = $cache->get($key);
 
             if ($hit !== null) {
-                // Empty string is a cached miss (no photo found).
-                $resolved[$id] = $hit !== '' ? $hit : null;
+                // Empty string means a previously-cached miss (no photo found).
+                $resolved[$id] = ($hit !== '') ? $hit : null;
             } else {
-                $toFetch[] = $id;
+                $toFetch[] = ['id' => $id, 'name' => (string) ($r['name'] ?? '')];
             }
         }
 
-        // Batch-fetch uncached athlete pages from ESPN.
+        // Batch-fetch uncached 247Sports profile pages.
         if (!empty($toFetch)) {
-            $this->scrapeEspnPhotos($toFetch, $resolved, $cache);
+            $this->scrape247Photos($toFetch, $resolved, $cache);
         }
 
         // Merge photo URLs back into the recruit list.
         return array_map(function ($r) use ($resolved) {
-            $r['photoUrl'] = $resolved[$r['athleteId'] ?? 0] ?? null;
+            $r['photoUrl'] = $resolved[(string) ($r['id'] ?? '')] ?? null;
             return $r;
         }, $recruits);
     }
 
     /**
-     * Concurrently scrape ESPN recruit profile pages for og:image headshots.
-     * Populates $resolved and writes per-athlete cache entries.
+     * Build a 247Sports player profile URL from a name and 247Sports recruit ID.
      *
-     * @param  int[]  $athleteIds
-     * @param  array  &$resolved   athleteId → URL|null  (written into)
+     * 247Sports URL format: https://247sports.com/player/{first-last}-{id}/
+     * Example: "Bryce Underwood", 4687399 → …/bryce-underwood-4687399/
      */
-    private function scrapeEspnPhotos(array $athleteIds, array &$resolved, $cache): void
+    private function make247Url(string $name, string $id): string
+    {
+        $slug = strtolower(trim($name));
+        // Keep only letters, digits, spaces, and hyphens.
+        $slug = preg_replace('/[^a-z0-9\s\-]/', '', $slug);
+        // Collapse runs of whitespace/hyphens into a single hyphen.
+        $slug = preg_replace('/[\s\-]+/', '-', $slug);
+        $slug = trim($slug, '-');
+
+        return self::SPORTS247_BASE . $slug . '-' . $id . '/';
+    }
+
+    /**
+     * Concurrently scrape 247Sports recruit profile pages for og:image headshots.
+     * Populates $resolved and writes per-recruit cache entries.
+     *
+     * @param  array  $recruits   list of ['id' => string, 'name' => string]
+     * @param  array  &$resolved  id → URL|null  (written into)
+     */
+    private function scrape247Photos(array $recruits, array &$resolved, $cache): void
     {
         $client = new Client([
-            'timeout'         => 8,
-            'connect_timeout' => 4,
-            'allow_redirects' => true,
+            'timeout'         => 10,
+            'connect_timeout' => 5,
+            'allow_redirects' => ['max' => 5],
             'http_errors'     => false,
             'headers'         => [
                 'User-Agent'      => self::SCRAPE_UA,
-                'Accept'          => 'text/html,application/xhtml+xml',
+                'Accept'          => 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
                 'Accept-Language' => 'en-US,en;q=0.9',
+                'Accept-Encoding' => 'gzip, deflate, br',
+                'Cache-Control'   => 'no-cache',
             ],
         ]);
 
-        $requests = function () use ($athleteIds, $client) {
-            foreach ($athleteIds as $id) {
-                yield (string) $id => new GuzzleRequest(
+        $requests = function () use ($recruits) {
+            foreach ($recruits as $r) {
+                yield $r['id'] => new GuzzleRequest(
                     'GET',
-                    self::ESPN_RECRUIT . $id
+                    $this->make247Url($r['name'], $r['id'])
                 );
             }
         };
@@ -285,19 +308,25 @@ class RecruitingController implements RequestHandlerInterface
                 $url = null;
 
                 if ($response->getStatusCode() === 200) {
-                    $url = $this->extractOgImage((string) $response->getBody());
+                    $html = (string) $response->getBody();
+                    $url  = $this->extractOgImage($html);
+
+                    // 247Sports sometimes returns a generic placeholder — skip it.
+                    if ($url && str_contains($url, 'default-player')) {
+                        $url = null;
+                    }
                 }
 
-                $resolved[(int) $id] = $url;
-                // Cache success for 7 days, miss for 24 hours.
+                $resolved[$id] = $url;
+                // Cache a real photo for 7 days; a miss for 24 h.
                 $ttl = $url ? (7 * 24 * 3600) : (24 * 3600);
-                $cache->put("ernestdefoe-recruiting.photo.{$id}", $url ?? '', $ttl);
+                $cache->put("ernestdefoe-recruiting.photo247.{$id}", $url ?? '', $ttl);
             },
 
             'rejected' => function ($reason, string $id) use (&$resolved, $cache) {
-                $resolved[(int) $id] = null;
-                // Cache the failure briefly so we don't hammer ESPN on errors.
-                $cache->put("ernestdefoe-recruiting.photo.{$id}", '', 3600);
+                $resolved[$id] = null;
+                // Cache the network failure briefly to avoid hammering 247Sports.
+                $cache->put("ernestdefoe-recruiting.photo247.{$id}", '', 3600);
             },
         ]);
 
@@ -305,12 +334,12 @@ class RecruitingController implements RequestHandlerInterface
     }
 
     /**
-     * Extract the og:image URL from an ESPN HTML page.
+     * Extract the og:image URL from an HTML page.
      * Handles both attribute orderings of the <meta> tag.
      */
     private function extractOgImage(string $html): ?string
     {
-        // <meta property="og:image" content="...">
+        // <meta property="og:image" content="…">
         if (preg_match(
             '/<meta[^>]+property=["\']og:image["\'][^>]+content=["\']([^"\']+)["\']/i',
             $html,
@@ -320,7 +349,7 @@ class RecruitingController implements RequestHandlerInterface
             return $url ?: null;
         }
 
-        // <meta content="..." property="og:image">  (reversed attribute order)
+        // <meta content="…" property="og:image">  (reversed attribute order)
         if (preg_match(
             '/<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']og:image["\']/i',
             $html,
