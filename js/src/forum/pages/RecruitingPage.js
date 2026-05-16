@@ -248,12 +248,12 @@ export default class RecruitingPage extends Page {
           : null,
       ]),
 
-      // Photo — ESPN CDN headshot (athleteId → ESPN URL); initials fallback on 404
+      // Photo — server-scraped ESPN og:image URL; initials avatar as fallback.
       m('.GNR-photoWrap', [
         m('.GNR-initials', inits),
-        r.athleteId
+        r.photoUrl
           ? m('img.GNR-photo', {
-              src:     `https://a.espncdn.com/i/headshots/college-football/players/full/${r.athleteId}.png`,
+              src:     r.photoUrl,
               alt:     r.name,
               loading: 'lazy',
               onerror: function () { this.style.display = 'none'; },
