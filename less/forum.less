@@ -1,203 +1,368 @@
 // ============================================================
 // GN Recruiting — Forum Styles
-// Provides the full .GN-widget + .GN-recruit card stack so the
-// widget is self-contained and works with OR without the fbsfb
-// Avocado theme.  When fbsfb is also installed these rules are
-// effectively identical to the ones it already defines, so there
-// is no visual conflict.
+// Full /recruiting page + responsive player card grid.
 // ============================================================
 
-// ── Sidebar container (standalone fallback) ───────────────────────────────────
-// When fbsfb is NOT installed the widget is injected into a new
-// .GN-widgetSidebar div that this extension creates inside
-// .sideNavContainer.  Give it the same flex + sticky treatment.
-.IndexPage .sideNavContainer {
-  display: flex;
-  align-items: flex-start;
-  gap: 1.5rem;
+// ── Hero banner ───────────────────────────────────────────────────────────────
+.GNPage-hero {
+  background: linear-gradient(135deg, #b22222 0%, #7a0000 100%);
+  color: #fff;
+  padding: 44px 0 36px;
 }
 
-.IndexPage .GN-widgetSidebar {
-  width: 280px;
-  flex-shrink: 0;
-  position: sticky;
-  top: 1rem;
+.GNPage-hero-inner {
+  max-width: 1160px;
+  margin: 0 auto;
+  padding: 0 24px;
 }
 
-@media (max-width: 900px) {
-  .IndexPage .GN-widgetSidebar {
-    display: none;
+.GNPage-title {
+  font-size: 1.9rem;
+  font-weight: 800;
+  margin: 0 0 6px;
+  color: #fff;
+  line-height: 1.2;
+
+  i {
+    margin-right: 10px;
+    opacity: 0.75;
   }
 }
 
-// ── Shared widget chrome ──────────────────────────────────────────────────────
-.GN-widget {
-  background: var(--body-bg, #fff);
-  border-radius: var(--border-radius, 14px);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.07), 0 1px 3px rgba(0, 0, 0, 0.04);
-  border: 1px solid var(--border-color, rgba(0, 0, 0, 0.07));
-  overflow: hidden;
-  margin-bottom: 12px;
+.GNPage-subtitle {
+  margin: 0;
+  font-size: 0.82rem;
+  color: rgba(255, 255, 255, 0.65);
+  font-weight: 500;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
 }
 
-.GN-widget-header {
+// ── Page body ─────────────────────────────────────────────────────────────────
+.GNPage-body {
+  max-width: 1160px;
+  margin: 0 auto;
+  padding: 28px 24px 48px;
+}
+
+// ── State indicators (loading / error / empty) ────────────────────────────────
+.GNPage-state {
+  text-align: center;
+  padding: 64px 24px;
+  color: var(--muted-color, #9fa0ab);
+
+  i {
+    display: block;
+    font-size: 2.2rem;
+    margin-bottom: 14px;
+  }
+
+  p {
+    font-size: 0.95rem;
+    margin: 0;
+  }
+
+  &--warn {
+    i, p { color: #c0392b; }
+  }
+}
+
+// ── Filter bar ────────────────────────────────────────────────────────────────
+.GNPage-filters {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 14px;
+  flex-wrap: wrap;
+}
+
+.GNPage-search-wrap {
+  position: relative;
+  flex: 1;
+  min-width: 200px;
+}
+
+.GNPage-search-icon {
+  position: absolute;
+  left: 11px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--muted-color, #9fa0ab);
+  font-size: 0.8rem;
+  pointer-events: none;
+}
+
+.GNPage-search {
+  width: 100%;
+  padding: 9px 12px 9px 32px;
+  border: 1px solid var(--border-color, rgba(0, 0, 0, 0.12));
+  border-radius: 8px;
+  font-size: 0.9rem;
+  background: var(--body-bg, #fff);
+  color: var(--body-color, #22232a);
+  box-sizing: border-box;
+
+  &:focus {
+    outline: none;
+    border-color: var(--primary-color, #b22222);
+    box-shadow: 0 0 0 2px rgba(178, 34, 34, 0.15);
+  }
+}
+
+.GNPage-select {
+  padding: 9px 14px;
+  border: 1px solid var(--border-color, rgba(0, 0, 0, 0.12));
+  border-radius: 8px;
+  font-size: 0.9rem;
+  background: var(--body-bg, #fff);
+  color: var(--body-color, #22232a);
+  cursor: pointer;
+
+  &:focus {
+    outline: none;
+    border-color: var(--primary-color, #b22222);
+  }
+}
+
+// ── Summary stats row ─────────────────────────────────────────────────────────
+.GNPage-stats {
+  display: flex;
+  gap: 0;
+  margin-bottom: 20px;
+  font-size: 0.82rem;
+  color: var(--muted-color, #9fa0ab);
+
+  span + span {
+    margin-left: 14px;
+    padding-left: 14px;
+    border-left: 1px solid var(--border-color, rgba(0, 0, 0, 0.1));
+  }
+}
+
+// ── Responsive card grid ──────────────────────────────────────────────────────
+.GNPage-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 16px;
+}
+
+// ── Player card ───────────────────────────────────────────────────────────────
+.GNR-card {
+  background: var(--body-bg, #fff);
+  border: 1px solid var(--border-color, rgba(0, 0, 0, 0.08));
+  border-radius: 16px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.04);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+
+  &:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 8px 22px rgba(0, 0, 0, 0.12);
+  }
+}
+
+// Top bar: rank + stars + rating badge
+.GNR-top {
   display: flex;
   align-items: center;
-  gap: 7px;
-  padding: 11px 14px 9px;
-  font-weight: 700;
+  gap: 6px;
+  padding: 9px 12px 7px;
+  border-bottom: 1px solid var(--border-color, rgba(0, 0, 0, 0.07));
+}
+
+.GNR-rank {
+  font-size: 0.68rem;
+  font-weight: 800;
+  color: var(--muted-color, #9fa0ab);
+  min-width: 26px;
+
+  &--none { opacity: 0.35; }
+}
+
+.GNR-stars {
+  flex: 1;
   font-size: 0.78rem;
+  color: #e8a020;
+  letter-spacing: 1px;
+}
+
+.GNR-ratingBadge {
+  font-size: 0.64rem;
+  font-weight: 700;
+  color: var(--muted-color, #9fa0ab);
+  background: var(--control-bg, rgba(0, 0, 0, 0.05));
+  padding: 2px 7px;
+  border-radius: 5px;
+  letter-spacing: 0.02em;
+}
+
+// Headshot photo area
+.GNR-photoWrap {
+  position: relative;
+  width: 88px;
+  height: 88px;
+  margin: 18px auto 10px;
+  border-radius: 50%;
+  overflow: hidden;
+  background: linear-gradient(145deg, var(--primary-color, #b22222) 0%, #7a0000 100%);
+  flex-shrink: 0;
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.2);
+}
+
+.GNR-initials {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.5rem;
+  font-weight: 800;
+  color: rgba(255, 255, 255, 0.92);
+  letter-spacing: 0.02em;
+  user-select: none;
+}
+
+.GNR-photo {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: top center;
+}
+
+// Card body
+.GNR-body {
+  padding: 4px 14px 12px;
+  text-align: center;
+  flex: 1;
+}
+
+.GNR-name {
+  font-size: 0.97rem;
+  font-weight: 700;
+  color: var(--heading-color, #22232a);
+  margin-bottom: 5px;
+  line-height: 1.3;
+}
+
+.GNR-pos {
+  display: inline-block;
+  background: var(--primary-color, #b22222);
+  color: #fff;
+  font-size: 0.62rem;
+  font-weight: 800;
+  padding: 3px 9px;
+  border-radius: 20px;
+  letter-spacing: 0.06em;
+  margin-bottom: 9px;
+  text-transform: uppercase;
+}
+
+.GNR-physicals {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--body-color, #22232a);
+  margin-bottom: 8px;
+}
+
+.GNR-detail {
+  font-size: 0.74rem;
+  color: var(--muted-color, #9fa0ab);
+  margin-bottom: 3px;
+  line-height: 1.4;
+
+  i {
+    font-size: 0.68rem;
+    margin-right: 4px;
+    opacity: 0.7;
+  }
+}
+
+.GNR-country {
+  font-size: 0.7rem;
+  color: var(--muted-color, #9fa0ab);
+}
+
+.GNR-typeBadge {
+  display: inline-block;
+  font-size: 0.6rem;
+  font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--muted-color, #9fa0ab);
-  border-bottom: 1px solid var(--border-color, rgba(0, 0, 0, 0.07));
-
-  i { font-size: 0.85em; }
+  border: 1px solid var(--border-color, rgba(0, 0, 0, 0.15));
+  padding: 2px 7px;
+  border-radius: 5px;
+  margin-top: 5px;
 }
 
-.GN-widget-body {
-  padding: 6px 0;
-}
-
-.GN-widget-loading,
-.GN-widget-empty {
-  padding: 14px;
+// Card footer: commitment pill
+.GNR-footer {
+  padding: 8px 12px 14px;
   text-align: center;
-  font-size: 0.82rem;
-  color: var(--muted-color, #9fa0ab);
 }
 
-// ── Recruiting widget header year tag ─────────────────────────────────────────
-.GN-recruitingWidget-year {
-  font-size: 0.8em;
-  opacity: 0.7;
-}
-
-// ── Recruit card ──────────────────────────────────────────────────────────────
-.GN-recruit {
-  display: flex;
+.GNR-commit {
+  display: inline-flex;
   align-items: center;
-  gap: 8px;
-  padding: 7px 12px;
-  border-bottom: 1px solid var(--border-color, rgba(0, 0, 0, 0.06));
-  min-height: 48px;
-
-  &:last-child { border-bottom: none; }
-  &:hover { background: var(--control-bg, #f8f8fa); }
-}
-
-// Left column: ranking + position badges stacked
-.GN-recruit-badges {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 3px;
-  flex-shrink: 0;
-  min-width: 32px;
-}
-
-.GN-recruit-rank {
-  font-size: 0.65rem;
-  font-weight: 800;
-  color: var(--muted-color, #9fa0ab);
-  line-height: 1;
-}
-
-.GN-recruit-pos {
-  background: var(--primary-color, #B22222);
-  color: #fff;
-  font-size: 0.6rem;
-  font-weight: 800;
-  padding: 2px 5px;
-  border-radius: 4px;
-  letter-spacing: 0.03em;
-  line-height: 1.4;
-  white-space: nowrap;
-}
-
-// Centre: info block
-.GN-recruit-info {
-  flex: 1;
-  min-width: 0;
-}
-
-.GN-recruit-name {
-  font-weight: 700;
-  font-size: 0.82rem;
-  color: var(--body-color, #22232a);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.GN-recruit-meta {
+  gap: 5px;
   font-size: 0.72rem;
-  color: var(--muted-color, #9fa0ab);
-  margin-top: 1px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.GN-recruit-stars {
-  font-size: 0.68rem;
-  color: var(--primary-color, #B22222);
-  margin-top: 2px;
-  letter-spacing: 0.5px;
-}
-
-.GN-recruit-rating {
-  font-size: 0.65rem;
-  color: var(--muted-color, #9fa0ab);
-  font-weight: 500;
-}
-
-// Right: commitment pill
-.GN-recruit-commit {
-  font-size: 0.65rem;
   font-weight: 700;
-  padding: 3px 7px;
+  padding: 5px 12px;
   border-radius: 20px;
   white-space: nowrap;
-  flex-shrink: 0;
-  letter-spacing: 0.02em;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+
+  i { font-size: 0.7rem; flex-shrink: 0; }
 
   &--committed {
-    background: rgba(78, 196, 106, 0.15);
+    background: rgba(46, 125, 64, 0.12);
     color: #2e7d40;
   }
 
   &--undecided {
-    background: rgba(159, 160, 171, 0.15);
+    background: rgba(159, 160, 171, 0.12);
     color: var(--muted-color, #9fa0ab);
-  }
-
-  &--decommitted {
-    background: rgba(226, 87, 74, 0.12);
-    color: #b03020;
   }
 }
 
-// ── Dark mode ─────────────────────────────────────────────────────────────────
-// Variable-based rules above already adapt; add explicit tweaks where needed.
+// ── Dark mode overrides ───────────────────────────────────────────────────────
 @media (prefers-color-scheme: dark) {
-  .GN-recruit-commit--committed {
+  .GNR-commit--committed {
     background: rgba(78, 196, 106, 0.18);
     color: #5dda7a;
-  }
-  .GN-recruit-commit--decommitted {
-    background: rgba(226, 87, 74, 0.18);
-    color: #e57060;
   }
 }
 
 body.App--dark-mode {
-  .GN-recruit-commit--committed {
+  .GNR-commit--committed {
     background: rgba(78, 196, 106, 0.18);
     color: #5dda7a;
   }
-  .GN-recruit-commit--decommitted {
-    background: rgba(226, 87, 74, 0.18);
-    color: #e57060;
+}
+
+// ── Responsive breakpoints ────────────────────────────────────────────────────
+@media (max-width: 768px) {
+  .GNPage-hero { padding: 28px 0 22px; }
+  .GNPage-title { font-size: 1.4rem; }
+  .GNPage-body { padding: 18px 14px 32px; }
+
+  .GNPage-grid {
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    gap: 12px;
+  }
+
+  .GNR-photoWrap { width: 72px; height: 72px; }
+  .GNR-initials { font-size: 1.2rem; }
+}
+
+@media (max-width: 420px) {
+  .GNPage-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
   }
 }

@@ -1,58 +1,24 @@
 import app from 'flarum/forum/app';
 import { extend } from 'flarum/common/extend';
 import IndexPage from 'flarum/forum/components/IndexPage';
-import RecruitingWidget from './forum/components/RecruitingWidget';
-
-/**
- * Walk a Mithril vnode tree looking for the first DOM element whose
- * className includes `targetClass`, then push `injectedVnode` into its
- * children.  Component vnodes (function/object tags) are skipped.
- */
-function injectInto(node, targetClass, injectedVnode) {
-  if (!node || typeof node !== 'object') return false;
-  if (typeof node.tag === 'function' || typeof node.tag === 'object') return false;
-
-  const cls = (node.attrs && (node.attrs.className || node.attrs['class'])) || '';
-  if (typeof cls === 'string' && cls.split(' ').includes(targetClass)) {
-    if (Array.isArray(node.children)) {
-      node.children.push(injectedVnode);
-    } else {
-      node.children = node.children != null
-        ? [node.children, injectedVnode]
-        : [injectedVnode];
-    }
-    return true;
-  }
-
-  if (Array.isArray(node.children)) {
-    return node.children.some((child) => injectInto(child, targetClass, injectedVnode));
-  }
-  return false;
-}
+import LinkButton from 'flarum/common/components/LinkButton';
+import RecruitingPage from './forum/pages/RecruitingPage';
 
 app.initializers.add('ernestdefoe-recruiting', () => {
-  /**
-   * Inject the RecruitingWidget into the sidebar.
-   *
-   * Priority 1 — If the GN theme (fbsfb) is installed it will have already
-   * created a .GN-widgetSidebar.  We append into that so all widgets sit in
-   * one coherent column.
-   *
-   * Priority 2 — If fbsfb is not installed we create a .GN-widgetSidebar
-   * ourselves inside .sideNavContainer (Flarum 2's native flex container).
-   * The recruiting LESS file adds the necessary flex + sticky styles.
-   */
-  extend(IndexPage.prototype, 'view', function (vnode) {
-    if (!vnode) return;
+  // Register the /recruiting route.
+  app.routes.recruiting = { path: '/recruiting', component: RecruitingPage };
 
-    const widget = m(RecruitingWidget);
-
-    // Try the GN theme sidebar first.
-    const injected = injectInto(vnode, 'GN-widgetSidebar', widget);
-
-    // Fallback: create a standalone sidebar next to the discussion list.
-    if (!injected) {
-      injectInto(vnode, 'sideNavContainer', m('.GN-widgetSidebar', [widget]));
-    }
+  // Add a "Recruiting" link to the IndexPage sidebar nav so users can reach
+  // the page from the forum home screen without needing to know the URL.
+  extend(IndexPage.prototype, 'navItems', function (items) {
+    items.add(
+      'recruiting',
+      m(LinkButton, {
+        href: app.route('recruiting'),
+        icon: 'fas fa-star',
+      }, app.translator.trans('ernestdefoe-recruiting.forum.nav.label')),
+      // Insert below the standard nav items (lower priority = lower position).
+      -10
+    );
   });
 });

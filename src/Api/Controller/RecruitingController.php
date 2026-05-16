@@ -163,11 +163,15 @@ class RecruitingController implements RequestHandlerInterface
 
         return [
             'id'          => $r['id']          ?? null,
+            'athleteId'   => isset($r['athleteId']) ? (int) $r['athleteId'] : null,
             'name'        => $r['name']        ?? 'Unknown',
             'position'    => isset($r['position']) ? strtoupper((string) $r['position']) : null,
             'height'      => $height,
             'weight'      => isset($r['weight']) ? ((int) $r['weight']) . ' lbs' : null,
+            'city'        => $city,
+            'state'       => $state,
             'hometown'    => $hometown,
+            'country'     => isset($r['country']) && $r['country'] !== 'USA' ? (string) $r['country'] : null,
             'stars'       => isset($r['stars'])   ? (int)   $r['stars']   : null,
             'rating'      => isset($r['rating'])  ? round((float) $r['rating'], 4) : null,
             'ranking'     => isset($r['ranking']) ? (int)   $r['ranking'] : null,

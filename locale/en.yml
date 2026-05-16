@@ -7,12 +7,21 @@ ernestdefoe-recruiting:
       year_help: "Leave blank to always display the current calendar year."
       team_label: "Team Filter"
       team_help: "Filter by committed/recruiting team. Leave blank for national top recruits."
-      widget_title_label: "Widget Title"
+      widget_title_label: "Page Title"
       max_recruits_label: "Max Recruits to Display"
       cache_minutes_label: "Cache Duration (minutes)"
   forum:
-    widget:
-      loading: "Loading…"
-      empty: "No recruits found."
+    nav:
+      label: "Recruiting"
+    page:
+      loading: "Loading recruits…"
+      empty: "No recruits match your filters."
       configure: "Set your CFBD API key in Admin → Extensions → GN Recruiting."
-      unavailable: "Recruiting data unavailable."
+      unavailable: "Recruiting data temporarily unavailable."
+      all_positions: "All Positions"
+      all_recruits: "All Recruits"
+      committed_only: "Committed"
+      undecided_only: "Undecided"
+      search_placeholder: "Search name, school, city…"
+      avg_rating: "Avg Rating"
+      committed_count: "Committed"
