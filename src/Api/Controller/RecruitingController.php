@@ -295,48 +295,98 @@ class RecruitingController implements RequestHandlerInterface
     /**
      * Extract the player's headshot URL from an On3 search results page.
      *
-     * Strategy: find the player's unique profile href (e.g. /rivals/bryce-underwood-15949/)
-     * by matching their name slug, then look for an on3static.com image in the
-     * surrounding HTML.  This avoids picking up featured/nav images that appear
-     * at the top of every page and caused the "same image for all players" bug.
+     * Strategy:
+     *  1. Collect all on3static.com player image positions in the page.
+     *  2. Collect all On3 profile-path positions (/rivals/... or /db/...).
+     *  3. Find the profile path that best matches the player's name slug.
+     *  4. Return the on3static image whose position is closest to that path.
      *
-     * We strip the cdn-cgi resize proxy prefix to get the full-quality CDN URL.
+     * This avoids picking up featured/nav images that appear at the top of
+     * every On3 page (they were causing the "same image for all players" bug)
+     * while also being robust to HTML quote styles and Next.js data attributes.
+     *
      * SVG files are skipped (those are team logos, not player headshots).
      */
     private function extractOn3Image(string $html, string $playerName): ?string
     {
-        // Build URL slug from player name: "Bryce Underwood" → "bryce-underwood"
+        // Build URL slug: "Bryce Underwood" → "bryce-underwood"
         $slug = strtolower(trim($playerName));
         $slug = preg_replace('/[^a-z0-9]+/', '-', $slug);
         $slug = trim($slug, '-');
 
-        // Image CDN pattern — matches both cdn-cgi resized and direct variants.
-        $imgPattern = '~https://on3static\.com(?:/cdn-cgi/image/[^\s"\']+)?(/uploads/assets/\d+/\d+/\d+\.(?:jpg|jpeg|png|webp))~i';
+        // ── 1. All on3static player images ───────────────────────────────────
+        $imgPattern = '~https://on3static\.com(?:/cdn-cgi/image/[^\s"\'>\]]+)?'
+                    . '(/uploads/assets/\d+/\d+/\d+\.(?:jpg|jpeg|png|webp))~i';
 
-        // Find the player's profile href anchor in the search results.
-        // e.g. href="/rivals/bryce-underwood-15949/"
-        if (preg_match(
-            '~["\'](?:https://www\.on3\.com)?/rivals/' . preg_quote($slug, '~') . '-\d+/~i',
+        preg_match_all($imgPattern, $html, $imgAll, PREG_OFFSET_CAPTURE);
+
+        if (empty($imgAll[0])) {
+            return null;
+        }
+
+        // ── 2. All On3 profile-path occurrences ───────────────────────────────
+        // Matches /rivals/{slug}-{id}/ or /db/{slug}-{id}/  anywhere in the HTML
+        // (href attributes, JSON data, Next.js __NEXT_DATA__, etc.)
+        preg_match_all(
+            '~/(?:rivals|db)/([a-z0-9][a-z0-9\-]*)-(\d{4,})/~i',
             $html,
-            $anchor,
+            $hrefAll,
             PREG_OFFSET_CAPTURE
-        )) {
-            $pos = $anchor[0][1];
+        );
 
-            // Images in card markup typically sit before the href — check the
-            // 3 000 chars leading up to the profile link first.
-            $before = substr($html, max(0, $pos - 3000), min(3000, $pos));
-            if (preg_match($imgPattern, $before, $m)) {
-                return self::ON3_STATIC_HOST . $m[1];
-            }
+        if (empty($hrefAll[0])) {
+            return null;
+        }
 
-            // Fallback: check 2 000 chars after the profile link.
-            $after = substr($html, $pos, 2000);
-            if (preg_match($imgPattern, $after, $m)) {
-                return self::ON3_STATIC_HOST . $m[1];
+        // ── 3. Find the profile path whose slug best matches the player ────────
+        $targetPos = null;
+
+        foreach ($hrefAll[0] as [$hrefStr, $hrefPos]) {
+            // $hrefAll[1] holds the slug portion captured by group 1.
+            // Re-derive it from the full match for simplicity.
+            if (preg_match('~/(?:rivals|db)/(' . preg_quote($slug, '~') . ')-\d+/~i', $hrefStr)) {
+                $targetPos = $hrefPos;
+                break;
             }
         }
 
-        return null; // player not found in search results
+        // Fallback: try matching just the first two slug parts (handles "Jr.",
+        // missing suffixes, or minor slug differences between CFBD and On3).
+        if ($targetPos === null) {
+            $parts     = explode('-', $slug);
+            $shortSlug = implode('-', array_slice($parts, 0, 2));
+
+            foreach ($hrefAll[0] as [$hrefStr, $hrefPos]) {
+                if (strlen($shortSlug) >= 5 &&
+                    stripos($hrefStr, '/' . $shortSlug . '-') !== false) {
+                    $targetPos = $hrefPos;
+                    break;
+                }
+            }
+        }
+
+        if ($targetPos === null) {
+            return null;
+        }
+
+        // ── 4. Closest image to the matched profile path ──────────────────────
+        $bestImgFull = null;
+        $bestImgPath = null;
+        $bestDist    = PHP_INT_MAX;
+
+        foreach ($imgAll[0] as $i => [$imgFull, $imgPos]) {
+            $dist = abs($targetPos - $imgPos);
+            if ($dist < $bestDist) {
+                $bestDist    = $dist;
+                $bestImgFull = $imgFull;
+                $bestImgPath = $imgAll[1][$i][0]; // captured path group
+            }
+        }
+
+        if ($bestImgPath !== null && $bestDist < 8000) {
+            return self::ON3_STATIC_HOST . $bestImgPath;
+        }
+
+        return null;
     }
 }
