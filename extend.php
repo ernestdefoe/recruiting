@@ -24,12 +24,23 @@ return [
     (new Extend\Routes('api'))
         ->get('/cfbd-recruits', 'cfbd.recruits', RecruitingController::class),
 
-    // ── Settings defaults ────────────────────────────────────────────────────
-    // Settings UI is registered via the JS Admin extender in admin.js / extend.js.
+    // ── Settings ─────────────────────────────────────────────────────────────
+    // Settings UI is registered via the JS Admin extender in admin.js /
+    // extend.js. The widget_title setting is the only one exposed to the
+    // forum frontend — RecruitingWidget reads it as
+    // app.forum.attribute('ernestdefoe-recruiting.widget_title') and falls
+    // back to 'Top Recruits' when unset.
     (new Extend\Settings())
+        ->serializeToForum(
+            'ernestdefoe-recruiting.widget_title',
+            'ernestdefoe-recruiting.widget_title',
+            null,
+            null,
+        )
         ->default('ernestdefoe-recruiting.api_key',       '')
         ->default('ernestdefoe-recruiting.year',          '')
         ->default('ernestdefoe-recruiting.team',          '')
+        ->default('ernestdefoe-recruiting.widget_title',  '')
         ->default('ernestdefoe-recruiting.max_recruits',  '25')
         ->default('ernestdefoe-recruiting.cache_minutes', '360'),
 ];

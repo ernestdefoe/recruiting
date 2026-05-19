@@ -35,6 +35,15 @@ export default [
       placeholder: 'e.g. Alabama',
     }))
 
+    // ── Widget title ─────────────────────────────────────────────────────────
+    .setting(() => ({
+      setting:     'ernestdefoe-recruiting.widget_title',
+      label:       'Page / Widget Title',
+      help:        'Heading shown above the recruiting widget and on the /recruiting page. Leave blank to use "Top Recruits".',
+      type:        'text',
+      placeholder: 'Top Recruits',
+    }))
+
     // ── Page display ─────────────────────────────────────────────────────────
     .setting(() => ({
       setting:     'ernestdefoe-recruiting.max_recruits',
