@@ -145,11 +145,15 @@ export default class RecruitingPage extends Page {
   }
 
   viewHero() {
-    const yearLabel = this.year ? ` — ${this.year} Class` : '';
+    const titleSetting = app.forum.attribute('ernestdefoe-recruiting.widget_title');
+    const baseTitle = (typeof titleSetting === 'string' && titleSetting.trim() !== '')
+      ? titleSetting.trim()
+      : t('title', 'Top Recruits');
+    const yearLabel = this.year ? ` — ${this.year} ${t('class_suffix', 'Class')}` : '';
     return m('.GNPage-hero', [
       m('.GNPage-hero-inner', [
-        m('h1.GNPage-title', [m('i.fa-solid.fa-star'), ` Top Recruits${yearLabel}`]),
-        m('p.GNPage-subtitle', 'FBSFB Recruiting · College Football Rankings · Powered by CFBD'),
+        m('h1.GNPage-title', [m('i.fa-solid.fa-star'), ` ${baseTitle}${yearLabel}`]),
+        m('p.GNPage-subtitle', t('subtitle', 'FBSFB Recruiting · College Football Rankings · Powered by CFBD')),
       ]),
     ]);
   }
@@ -157,7 +161,7 @@ export default class RecruitingPage extends Page {
   viewLoading() {
     return m('.GNPage-state', [
       m('i.fa-solid.fa-spinner.fa-spin'),
-      m('p', 'Loading recruits…'),
+      m('p', t('loading', 'Loading recruits…')),
     ]);
   }
 
@@ -165,25 +169,24 @@ export default class RecruitingPage extends Page {
     if (this.error === 'api_key_missing') {
       return m('.GNPage-state.GNPage-state--warn', [
         m('i.fa-solid.fa-key'),
-        m('p', 'Set your CFBD API key in Admin → Extensions → FBSFB Recruiting.'),
+        m('p', t('configure', 'Set your CFBD API key in Admin → Extensions → FBSFB Recruiting.')),
       ]);
     }
     if (this.error === 'invalid_api_key') {
       return m('.GNPage-state.GNPage-state--warn', [
         m('i.fa-solid.fa-triangle-exclamation'),
-        m('p', 'Invalid API key — check Admin → Extensions → FBSFB Recruiting.'),
+        m('p', t('invalid_key', 'Invalid API key — check Admin → Extensions → FBSFB Recruiting.')),
       ]);
     }
     return m('.GNPage-state.GNPage-state--warn', [
       m('i.fa-solid.fa-circle-exclamation'),
-      m('p', 'Recruiting data is temporarily unavailable. Please try again later.'),
+      m('p', t('unavailable', 'Recruiting data temporarily unavailable.')),
     ]);
   }
 
   viewContent() {
     const recruits  = this.filtered();
 
-    // Stats are derived from the filtered list so every number is consistent.
     const committed = recruits.filter((r) => r.status === 'committed').length;
     const avgRating = recruits.length
       ? (recruits.reduce((s, r) => s + (r.rating || 0), 0) / recruits.length).toFixed(4)
@@ -193,13 +196,13 @@ export default class RecruitingPage extends Page {
       this.viewFilters(),
 
       m('.GNPage-stats', [
-        m('span', `${recruits.length} Recruit${recruits.length !== 1 ? 's' : ''}`),
-        avgRating ? m('span', `Avg Rating: ${avgRating}`) : null,
-        m('span', `${committed} Committed`),
+        m('span', `${recruits.length} ${t(recruits.length === 1 ? 'recruit_singular' : 'recruit_plural', recruits.length === 1 ? 'Recruit' : 'Recruits')}`),
+        avgRating ? m('span', `${t('avg_rating', 'Avg Rating')}: ${avgRating}`) : null,
+        m('span', `${committed} ${t('committed_count', 'Committed')}`),
       ]),
 
       recruits.length === 0
-        ? m('.GNPage-state', [m('i.fa-solid.fa-magnifying-glass'), m('p', 'No recruits match your filters.')])
+        ? m('.GNPage-state', [m('i.fa-solid.fa-magnifying-glass'), m('p', t('empty', 'No recruits match your filters.'))])
         : m('.GNPage-grid', recruits.map((r) => this.viewCard(r))),
     ];
   }
@@ -212,7 +215,7 @@ export default class RecruitingPage extends Page {
         m('i.fa-solid.fa-magnifying-glass.GNPage-search-icon'),
         m('input.GNPage-search', {
           type:        'text',
-          placeholder: 'Search name, school, city…',
+          placeholder: t('search_placeholder', 'Search name, school, city…'),
           value:       this.filterSearch,
           oninput:     (e) => { this.filterSearch = e.target.value; m.redraw(); },
         }),
@@ -222,7 +225,7 @@ export default class RecruitingPage extends Page {
         value:    this.filterPosition,
         onchange: (e) => { this.filterPosition = e.target.value; m.redraw(); },
       }, [
-        m('option', { value: '' }, 'All Positions'),
+        m('option', { value: '' }, t('all_positions', 'All Positions')),
         ...positions.map((p) => m('option', { value: p }, p)),
       ]),
 
@@ -230,9 +233,9 @@ export default class RecruitingPage extends Page {
         value:    this.filterStatus,
         onchange: (e) => { this.filterStatus = e.target.value; m.redraw(); },
       }, [
-        m('option', { value: 'all' },       'All Recruits'),
-        m('option', { value: 'committed' }, 'Committed'),
-        m('option', { value: 'undecided' }, 'Undecided'),
+        m('option', { value: 'all' },       t('all_recruits', 'All Recruits')),
+        m('option', { value: 'committed' }, t('committed_only', 'Committed')),
+        m('option', { value: 'undecided' }, t('undecided_only', 'Undecided')),
       ]),
     ]);
   }
@@ -323,5 +326,20 @@ export default class RecruitingPage extends Page {
             ]),
       ]),
     ]);
+  }
+}
+
+/* Translator wrapper. Returns the fallback when the key isn't
+ * registered — Flarum's trans() returns the literal key on miss
+ * which is worse than English text, so we compare and substitute. */
+function t(suffix, fallback) {
+  const key = `ernestdefoe-recruiting.forum.page.${suffix}`;
+  try {
+    const out = app.translator.trans(key);
+    if (out == null) return fallback;
+    if (typeof out === 'string' && out === key) return fallback;
+    return out;
+  } catch (e) {
+    return fallback;
   }
 }

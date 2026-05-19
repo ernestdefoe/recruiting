@@ -14,9 +14,13 @@ ernestdefoe-recruiting:
     nav:
       label: "Recruiting"
     page:
+      title: "Top Recruits"
+      subtitle: "FBSFB Recruiting · College Football Rankings · Powered by CFBD"
+      class_suffix: "Class"
       loading: "Loading recruits…"
       empty: "No recruits match your filters."
       configure: "Set your CFBD API key in Admin → Extensions → FBSFB Recruiting."
+      invalid_key: "Invalid API key — check Admin → Extensions → FBSFB Recruiting."
       unavailable: "Recruiting data temporarily unavailable."
       all_positions: "All Positions"
       all_recruits: "All Recruits"
@@ -25,3 +29,5 @@ ernestdefoe-recruiting:
       search_placeholder: "Search name, school, city…"
       avg_rating: "Avg Rating"
       committed_count: "Committed"
+      recruit_singular: "Recruit"
+      recruit_plural: "Recruits"

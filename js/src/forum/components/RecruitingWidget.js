@@ -18,7 +18,13 @@ export default class RecruitingWidget extends Component {
   oninit(vnode) {
     super.oninit(vnode);
     this.recruits = [];
-    this.title    = app.forum.attribute('ernestdefoe-recruiting.widget_title') || 'Top Recruits';
+    /* admin-configurable widget title — serializeToForum wires
+     * the setting into the forum payload (see extend.php). Falls
+     * back to the locale-overridable default. */
+    const adminTitle = app.forum.attribute('ernestdefoe-recruiting.widget_title');
+    this.title    = (typeof adminTitle === 'string' && adminTitle.trim() !== '')
+      ? adminTitle.trim()
+      : t('title', 'Top Recruits');
     this.year     = null;
     this.loading  = true;
     this.error    = null;
@@ -86,20 +92,20 @@ export default class RecruitingWidget extends Component {
     if (this.error === 'api_key_missing') {
       return m('.GN-widget-empty', [
         m('i.fas.fa-key', { style: 'margin-right:6px' }),
-        'Set your CFBD API key in Admin → Extensions → FBSFB Recruiting.',
+        t('configure', 'Set your CFBD API key in Admin → Extensions → FBSFB Recruiting.'),
       ]);
     }
 
     if (this.error === 'invalid_api_key') {
-      return m('.GN-widget-empty', 'Invalid API key — check Admin settings.');
+      return m('.GN-widget-empty', t('invalid_key', 'Invalid API key — check Admin settings.'));
     }
 
     if (this.error) {
-      return m('.GN-widget-empty', 'Recruiting data unavailable.');
+      return m('.GN-widget-empty', t('unavailable', 'Recruiting data temporarily unavailable.'));
     }
 
     if (!this.recruits.length) {
-      return m('.GN-widget-empty', 'No recruits found for this year / team.');
+      return m('.GN-widget-empty', t('empty', 'No recruits found for this year / team.'));
     }
 
     return this.recruits.map((r) => this.viewRecruit(r));
@@ -111,8 +117,8 @@ export default class RecruitingWidget extends Component {
       ? 'GN-recruit-commit--committed'
       : 'GN-recruit-commit--undecided';
     const statusLabel = committed
-      ? (r.school ? `→ ${r.school}` : 'Committed')
-      : 'Undecided';
+      ? (r.school ? `→ ${r.school}` : t('committed_only', 'Committed'))
+      : t('undecided_only', 'Undecided');
 
     const starsStr = this.stars(r.stars);
     const meta     = [r.height, r.hometown].filter(Boolean).join(' · ');
@@ -148,5 +154,22 @@ export default class RecruitingWidget extends Component {
       // Right: commitment pill
       m('span.GN-recruit-commit', { class: statusClass }, statusLabel),
     ]);
+  }
+}
+
+/* Safe translator wrapper. Flarum's trans() returns the lookup key
+ * verbatim when no translation exists, which is worse than the
+ * English fallback. We compare against the key and substitute on
+ * miss so adding a new key to en.yml is a hot swap, but absent ones
+ * still read as readable English. */
+function t(suffix, fallback) {
+  const key = `ernestdefoe-recruiting.forum.page.${suffix}`;
+  try {
+    const out = app.translator.trans(key);
+    if (out == null) return fallback;
+    if (typeof out === 'string' && out === key) return fallback;
+    return out;
+  } catch (e) {
+    return fallback;
   }
 }
