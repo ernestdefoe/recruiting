@@ -51,8 +51,9 @@ All settings are found in **Admin → Extensions → FBSFB Recruiting**.
 | **API Key** | Your CFBD bearer token | *(required)* |
 | **Recruiting Year** | Class year to display (e.g. `2026`) | Current calendar year |
 | **Team Filter** | Show only recruits committed to a specific team (e.g. `Alabama`). Leave blank for national rankings. | *(blank — national)* |
+| **Page / Widget Title** | Heading shown above the widget and on `/recruiting`. Leave blank for "Top Recruits". | *(blank)* |
 | **Max Recruits** | How many recruits to display (1–100) | `25` |
-| **Cache Duration** | How long to cache CFBD responses in minutes | `360` (6 hours) |
+| **Cache Duration** | Soft TTL for CFBD responses (minutes). After this expires the next request serves the cached data and dispatches a background refresh — see [Caching & refresh strategy](#caching--refresh-strategy). | `360` (6 hours) |
 
 ---
 
@@ -60,11 +61,55 @@ All settings are found in **Admin → Extensions → FBSFB Recruiting**.
 
 1. A forum member navigates to `/recruiting` (or clicks the **Recruiting** link in the sidebar nav).
 2. The JS frontend calls the internal API route `GET /api/cfbd-recruits`.
-3. The PHP controller reads your admin settings, checks Flarum's cache, and if needed proxies a request to `https://api.collegefootballdata.com/recruiting/players?year=…&team=…`.
-4. Results are sorted by national ranking, transformed into a clean JSON shape, and cached for the configured duration.
+3. The PHP controller reads your admin settings and checks Flarum's cache. If the cached payload is fresh it returns immediately. If it's past the soft TTL it dispatches a background refresh job and returns the cached (stale) data immediately — see [Caching & refresh strategy](#caching--refresh-strategy).
+4. The refresh job (`RefreshRecruitsJob`) proxies a request to `https://api.collegefootballdata.com/recruiting/players?year=…&team=…`, sorts results by national ranking, transforms them into the JSON shape, and writes the new payload back to the cache envelope.
 5. Recruit records are enriched with On3 headshots (see below) and returned to the client.
 6. Player cards are rendered with national rank, stars, headshot, physical measurements, high school, hometown, and commitment pill.
 7. Client-side filters let users narrow by position, commitment status, or keyword search instantly without a second API call.
+
+---
+
+## Caching & refresh strategy
+
+The extension uses a **stale-while-revalidate** cache envelope so a CFBD round-trip (≤ 10 s) never blocks the user's request.
+
+### Cache shape
+
+```
+ernestdefoe-recruiting.<hash> → { data: [...], fetched_at: <unix ts> }
+```
+
+- **Hard retention:** 7 days. Stale data is still served if every refresh attempt fails — better than a blank widget during a CFBD outage.
+- **Soft TTL:** the **Cache Duration** setting (default 6 hours). Determines when a request is treated as stale and triggers a background refresh.
+
+### Refresh paths
+
+| State | Behaviour |
+|---|---|
+| Fresh cache (within soft TTL) | Return cached data. No network. |
+| Stale cache, no refresh in flight | Dispatch `RefreshRecruitsJob`, return cached data immediately. A 90 s "refreshing" lock prevents N concurrent requests from dispatching N jobs in a stampede. |
+| Stale cache, refresh already in flight | Return cached data immediately. The in-flight job will repopulate the cache for the next visitor. |
+| No cache at all (first request ever, or `cache:clear`) | Inline CFBD fetch. This is the ONE request that pays the API round-trip on the request thread. |
+
+### Recommended: run a queue worker
+
+By default Flarum 2 ships with the **`sync` queue driver**, which means `RefreshRecruitsJob::dispatch()` runs inline in the request — defeating the point of the stale-while-revalidate pattern (one unlucky stale request per soft-TTL window still pays the CFBD cost).
+
+For zero-wait refresh, configure a real queue driver in `config.php`:
+
+```php
+'queue' => [
+    'driver' => 'database',     // or 'redis', 'sqs', etc.
+],
+```
+
+…then run a queue worker (typically under supervisor / systemd):
+
+```bash
+php flarum queue:work --tries=3 --timeout=60
+```
+
+With a real driver the dispatch returns in <1 ms and the worker handles the CFBD fetch in the background. Every request — even the first one after the soft TTL expires — gets cached data instantly.
 
 ---
 
