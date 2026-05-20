@@ -1,6 +1,6 @@
 {
     "name": "ernestdefoe/recruiting",
-    "description": "College football recruiting tracker for Flarum 2. Pulls live data from the College Football Data API (collegefootballdata.com) and displays a recruiting widget on the forum index.",
+    "description": "College football recruiting tracker for Flarum 2. Pulls live data from the College Football Data API (collegefootballdata.com) and renders a recruiting rankings page at /recruiting.",
     "type": "flarum-extension",
     "keywords": ["flarum", "college football", "recruiting", "cfbd", "gridiron"],
     "homepage": "https://github.com/ernestdefoe/recruiting",

@@ -140,6 +140,11 @@ class RecruitingController implements RequestHandlerInterface
     {
         $data = $this->cfbd->fetchRecruits($apiKey, $year, $team, $maxRecruits);
 
+        // Pre-enrich before storing so every subsequent serve-from-cache
+        // path (including the stale-while-revalidate branch above) reads
+        // ready-to-render data and never blocks on the On3 scrape.
+        $data = $this->photos->enrich($data, $year);
+
         $this->cache->put($cacheKey, [
             'data'       => $data,
             'fetched_at' => time(),
@@ -149,14 +154,15 @@ class RecruitingController implements RequestHandlerInterface
     }
 
     /**
-     * Enrich with photos + frame the JSON response. Pulled out so
-     * both the inline-fetch and serve-from-cache paths produce the
-     * same shape.
+     * Frame the JSON response. Photo enrichment already happened at
+     * cache-write time (RefreshRecruitsJob or serveInline), so we serve
+     * the cached payload verbatim — no inline On3 fetch on the request
+     * path.
      */
     private function jsonRecruits(array $data, string $year): JsonResponse
     {
         return new JsonResponse([
-            'data' => $this->photos->enrich($data, $year),
+            'data' => $data,
             'year' => (int) $year,
         ]);
     }

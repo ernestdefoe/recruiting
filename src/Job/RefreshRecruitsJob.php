@@ -3,6 +3,7 @@
 namespace Ernestdefoe\Recruiting\Job;
 
 use Ernestdefoe\Recruiting\Service\CfbdClient;
+use Ernestdefoe\Recruiting\Service\On3PhotoEnricher;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Cache\Repository as CacheRepository;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -45,9 +46,10 @@ class RefreshRecruitsJob implements ShouldQueue
     ) {}
 
     public function handle(
-        CfbdClient      $cfbd,
-        CacheRepository $cache,
-        LoggerInterface $log,
+        CfbdClient       $cfbd,
+        On3PhotoEnricher $photos,
+        CacheRepository  $cache,
+        LoggerInterface  $log,
     ): void {
         try {
             $data = $cfbd->fetchRecruits($this->apiKey, $this->year, $this->team, $this->maxRecruits);
@@ -63,10 +65,18 @@ class RefreshRecruitsJob implements ShouldQueue
             return;
         }
 
+        // Enrich with On3 headshots here, not in the request path.
+        // imageMap() will rebuild its 24-hour cache if expired, which
+        // can stall up to ~12s on the On3 fetch — fine inside a worker,
+        // catastrophic on a stale-serve request. Photo enrichment never
+        // throws (it swallows transport errors and serves un-photoed
+        // recruits) so no try/catch here.
+        $data = $photos->enrich($data, $this->year);
+
         // Cache envelope retention is much longer than the soft TTL
         // (controller default: 6 hours soft, 7 days hard). Stale
         // data can still be served if every refresh attempt fails
-        // — better than an empty widget.
+        // — better than an empty page.
         $cache->put($this->cacheKey, [
             'data'       => $data,
             'fetched_at' => time(),
