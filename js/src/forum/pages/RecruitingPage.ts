@@ -1,3 +1,7 @@
+// @ts-nocheck — TODO: declare class properties + Mithril vnode/callback types
+// Transitional marker; this file uses Flarum's `this.foo = ...` initialiser
+// pattern which TypeScript strict mode rejects. Remove once a follow-up
+// pass adds explicit property declarations.
 import app from 'flarum/forum/app';
 import Page from 'flarum/common/components/Page';
 

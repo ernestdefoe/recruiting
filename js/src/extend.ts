@@ -1,4 +1,4 @@
-import { Admin } from 'flarum/common/extenders';
+import Admin from 'flarum/common/extenders/Admin';
 
 /**
  * Admin extender — registers settings fields on the extension's settings
