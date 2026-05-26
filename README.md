@@ -1,5 +1,11 @@
 # FBSFB Recruiting
 
+[![Floxum](https://floxum.com/extension/ernestdefoe/recruiting/badge/name)](https://floxum.com/extension/ernestdefoe/recruiting)
+[![Version](https://floxum.com/extension/ernestdefoe/recruiting/badge/highest-version)](https://floxum.com/extension/ernestdefoe/recruiting)
+[![Downloads](https://floxum.com/extension/ernestdefoe/recruiting/badge/downloads)](https://floxum.com/extension/ernestdefoe/recruiting)
+[![Review](https://floxum.com/extension/ernestdefoe/recruiting/badge/review)](https://floxum.com/extension/ernestdefoe/recruiting)
+[![License](https://floxum.com/extension/ernestdefoe/recruiting/badge/license)](https://floxum.com/extension/ernestdefoe/recruiting)
+
 A Flarum 2 extension that pulls live college football recruiting rankings from the [College Football Data API](https://collegefootballdata.com/) and displays them on a dedicated `/recruiting` page inside your Flarum forum.
 
 ![Desktop view](docs/screenshot-desktop.png)
