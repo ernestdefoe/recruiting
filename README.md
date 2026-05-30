@@ -173,6 +173,13 @@ CFBD provides a free API key with generous rate limits. The extension caches all
 
 ---
 
+## Support
+
+Questions, bug reports, and feature requests:
+
+- **Support forum:** https://ernestdefoe.online
+- **Issues:** https://github.com/ernestdefoe/recruiting/issues
+
 ## License
 
 MIT
