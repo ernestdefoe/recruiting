@@ -2,7 +2,6 @@
 
 namespace Ernestdefoe\Recruiting\Service;
 
-use GuzzleHttp\Client;
 use GuzzleHttp\ClientInterface;
 use GuzzleHttp\Exception\RequestException;
 
@@ -14,21 +13,21 @@ use GuzzleHttp\Exception\RequestException;
  *
  * Carved out of the original RecruitingController so the controller
  * stays a thin orchestrator and the HTTP + transform layer is
- * testable in isolation. Pass any PSR-18-shaped ClientInterface in
- * tests; the default constructor wires Guzzle with the same 10 s /
- * 5 s timeouts the controller used before.
+ * testable in isolation. The ClientInterface is container-managed
+ * (bound in RecruitingServiceProvider); per-request timeouts are set
+ * below so the shared client can also serve the On3 enricher.
  */
 class CfbdClient
 {
     private const BASE_URL  = 'https://api.collegefootballdata.com';
     private const USER_AGENT = 'FBSFB/1.0 (Flarum extension)';
 
-    public function __construct(private ?ClientInterface $http = null)
+    /** Per-request timeouts (seconds) — match the original client defaults. */
+    private const TIMEOUT         = 10;
+    private const CONNECT_TIMEOUT = 5;
+
+    public function __construct(private ClientInterface $http)
     {
-        $this->http ??= new Client([
-            'timeout'         => 10,
-            'connect_timeout' => 5,
-        ]);
     }
 
     /**
@@ -53,8 +52,10 @@ class CfbdClient
                     'Accept'        => 'application/json',
                     'User-Agent'    => self::USER_AGENT,
                 ],
-                'query'       => $query,
-                'http_errors' => false,
+                'query'           => $query,
+                'timeout'         => self::TIMEOUT,
+                'connect_timeout' => self::CONNECT_TIMEOUT,
+                'http_errors'     => false,
             ]);
         } catch (RequestException $e) {
             throw new \RuntimeException('cfbd_unreachable');

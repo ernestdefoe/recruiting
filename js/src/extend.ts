@@ -1,4 +1,23 @@
+import app from 'flarum/admin/app';
 import Admin from 'flarum/common/extenders/Admin';
+
+/**
+ * Human-readable status line for the last successful On3 scrape, read from
+ * the persisted settings the On3PhotoEnricher writes on each refresh. Lets
+ * operators see at a glance whether headshot enrichment is still working.
+ */
+function lastScrapeNote(): string {
+  const settings = app.data.settings || {};
+  const ts = settings['ernestdefoe-recruiting.on3_last_scrape'];
+  const count = settings['ernestdefoe-recruiting.on3_last_count'];
+
+  if (!ts) {
+    return 'On3 headshots have not been fetched yet.';
+  }
+
+  const when = new Date(Number(ts) * 1000).toLocaleString();
+  return `Last successful On3 scrape: ${when}${count ? ` (${count} players)` : ''}.`;
+}
 
 /**
  * Admin extender — registers settings fields on the extension's settings
@@ -63,5 +82,18 @@ export default [
       type:        'number',
       placeholder: '360',
       min:         1,
+    }))
+
+    // ── On3 headshots ────────────────────────────────────────────────────────
+    .setting(() => ({
+      setting: 'ernestdefoe-recruiting.photos_enabled',
+      label:   'Enable On3 player headshots',
+      help:
+        "Fetches player photos by scraping On3's public rankings page — one " +
+        'outbound request per recruiting class, cached for 24 hours. Disable to ' +
+        'stop all outbound On3 traffic; recruits then display star-tier initials ' +
+        'avatars instead. ' +
+        lastScrapeNote(),
+      type:    'boolean',
     })),
 ];

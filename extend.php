@@ -1,9 +1,16 @@
 <?php
 
 use Ernestdefoe\Recruiting\Api\Controller\RecruitingController;
+use Ernestdefoe\Recruiting\RecruitingServiceProvider;
 use Flarum\Extend;
 
 return [
+    // ── Container bindings ─────────────────────────────────────────────────────
+    // Binds the shared GuzzleHttp\ClientInterface injected into CfbdClient
+    // and On3PhotoEnricher.
+    (new Extend\ServiceProvider())
+        ->register(RecruitingServiceProvider::class),
+
     // ── Frontend ──────────────────────────────────────────────────────────────
     (new Extend\Frontend('forum'))
         ->js(__DIR__ . '/js/dist/forum.js')
@@ -42,5 +49,8 @@ return [
         ->default('ernestdefoe-recruiting.team',          '')
         ->default('ernestdefoe-recruiting.widget_title',  '')
         ->default('ernestdefoe-recruiting.max_recruits',  '25')
-        ->default('ernestdefoe-recruiting.cache_minutes', '360'),
+        ->default('ernestdefoe-recruiting.cache_minutes', '360')
+        // On3 headshot scraping is on by default (preserves existing
+        // behaviour) but operators can disable all outbound On3 traffic.
+        ->default('ernestdefoe-recruiting.photos_enabled', '1'),
 ];

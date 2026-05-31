@@ -2,7 +2,7 @@
 
 namespace Ernestdefoe\Recruiting\Service;
 
-use GuzzleHttp\Client;
+use Flarum\Settings\SettingsRepositoryInterface;
 use GuzzleHttp\ClientInterface;
 use Illuminate\Contracts\Cache\Repository as CacheRepository;
 use Psr\Log\LoggerInterface;
@@ -29,28 +29,36 @@ class On3PhotoEnricher
     private const STATIC_HOST  = 'https://on3static.com';
     private const CACHE_TTL    = 24 * 3600;
 
-    /** Browser-like UA so On3 serves full server-rendered HTML. */
-    private const SCRAPE_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
-        . 'AppleWebKit/537.36 (KHTML, like Gecko) '
-        . 'Chrome/124.0.0.0 Safari/537.36';
+    /** Per-request timeouts (seconds) for the rankings fetch. */
+    private const TIMEOUT         = 12;
+    private const CONNECT_TIMEOUT = 5;
+
+    /**
+     * Honest User-Agent identifying this extension. We deliberately do NOT
+     * spoof a browser UA: scraping with a forged identity violates On3's
+     * ToS and risks the forum's IP being WAF-blocked. If On3 stops serving
+     * usable HTML to this UA, operators should disable photo enrichment
+     * (the `photos_enabled` setting) rather than re-introduce spoofing.
+     */
+    private const USER_AGENT = 'ernestdefoe-recruiting (Flarum extension; +https://github.com/ernestdefoe/recruiting)';
+
+    /**
+     * A healthy rankings page yields ~150 players. Fewer than this after a
+     * successful (HTTP 200) fetch signals the page layout changed and the
+     * proximity parser is silently failing — worth a warning to the log.
+     */
+    private const MIN_EXPECTED_PLAYERS = 10;
+
+    /** Persisted setting keys for the admin "last scrape" status display. */
+    private const LAST_SCRAPE_KEY = 'ernestdefoe-recruiting.on3_last_scrape';
+    private const LAST_COUNT_KEY  = 'ernestdefoe-recruiting.on3_last_count';
 
     public function __construct(
         private CacheRepository $cache,
         private LoggerInterface $log,
-        private ?ClientInterface $http = null,
+        private ClientInterface $http,
+        private SettingsRepositoryInterface $settings,
     ) {
-        $this->http ??= new Client([
-            'timeout'         => 12,
-            'connect_timeout' => 5,
-            'allow_redirects' => ['max' => 5],
-            'http_errors'     => false,
-            'headers'         => [
-                'User-Agent'      => self::SCRAPE_UA,
-                'Accept'          => 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-                'Accept-Language' => 'en-US,en;q=0.9',
-                'Referer'         => 'https://www.on3.com/',
-            ],
-        ]);
     }
 
     /**
@@ -62,6 +70,13 @@ class On3PhotoEnricher
      */
     public function enrich(array $recruits, string $year): array
     {
+        // Operators can disable the On3 scrape entirely (it's an outbound,
+        // unauthenticated request to a third-party site). When off, recruits
+        // render with star-tier initials avatars instead of headshots.
+        if (! $this->enabled()) {
+            return $recruits;
+        }
+
         $imageMap = $this->imageMap($year);
         if (empty($imageMap)) {
             return $recruits;
@@ -106,7 +121,16 @@ class On3PhotoEnricher
     private function build(string $year): array
     {
         try {
-            $response = $this->http->request('GET', self::RANKINGS_URL . $year . '/');
+            $response = $this->http->request('GET', self::RANKINGS_URL . $year . '/', [
+                'timeout'         => self::TIMEOUT,
+                'connect_timeout' => self::CONNECT_TIMEOUT,
+                'allow_redirects' => ['max' => 5],
+                'http_errors'     => false,
+                'headers'         => [
+                    'User-Agent' => self::USER_AGENT,
+                    'Accept'     => 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                ],
+            ]);
         } catch (\Throwable $e) {
             $this->log->warning('[recruiting] On3 rankings fetch failed', ['exception' => $e]);
             return [];
@@ -117,12 +141,28 @@ class On3PhotoEnricher
             return [];
         }
 
-        $map = $this->parse((string) $response->getBody());
+        $map   = $this->parse((string) $response->getBody());
+        $count = count($map);
 
-        $this->log->info('[recruiting] On3 image map built', [
-            'year'    => $year,
-            'players' => count($map),
-        ]);
+        if ($count > 0) {
+            // Record a successful scrape so the admin panel can show when
+            // headshots were last refreshed.
+            $this->recordScrape($count);
+        }
+
+        if ($count < self::MIN_EXPECTED_PLAYERS) {
+            // Fetch succeeded (HTTP 200) but the proximity parser found
+            // almost nothing — On3's page layout has likely changed and is
+            // silently breaking headshots. Surface it instead of failing mute.
+            $this->log->warning('[recruiting] On3 rankings parsed only ' . $count
+                . ' players (expected >= ' . self::MIN_EXPECTED_PLAYERS
+                . ') — On3 page layout may have changed', ['year' => $year]);
+        } else {
+            $this->log->info('[recruiting] On3 image map built', [
+                'year'    => $year,
+                'players' => $count,
+            ]);
+        }
 
         return $map;
     }
@@ -196,5 +236,26 @@ class On3PhotoEnricher
         $slug = strtolower(trim($name));
         $slug = preg_replace('/[^a-z0-9]+/', '-', $slug);
         return trim($slug, '-');
+    }
+
+    /**
+     * Whether On3 photo enrichment is enabled. Defaults to on (preserving
+     * existing behaviour) but operators can switch it off to stop all
+     * outbound On3 traffic.
+     */
+    private function enabled(): bool
+    {
+        return (bool) $this->settings->get('ernestdefoe-recruiting.photos_enabled', '1');
+    }
+
+    /**
+     * Persist the timestamp + player count of the last successful scrape so
+     * the admin panel can show "last refreshed" and operators can tell at a
+     * glance whether On3 enrichment is still working.
+     */
+    private function recordScrape(int $count): void
+    {
+        $this->settings->set(self::LAST_SCRAPE_KEY, (string) time());
+        $this->settings->set(self::LAST_COUNT_KEY, (string) $count);
     }
 }

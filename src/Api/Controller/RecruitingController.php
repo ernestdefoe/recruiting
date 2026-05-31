@@ -8,6 +8,8 @@ use Ernestdefoe\Recruiting\Service\On3PhotoEnricher;
 use Flarum\Http\RequestUtil;
 use Flarum\Settings\SettingsRepositoryInterface;
 use Illuminate\Contracts\Bus\Dispatcher as BusDispatcher;
+use Illuminate\Contracts\Cache\LockProvider;
+use Illuminate\Contracts\Cache\LockTimeoutException;
 use Illuminate\Contracts\Cache\Repository as CacheRepository;
 use Laminas\Diactoros\Response\JsonResponse;
 use Psr\Http\Message\ResponseInterface;
@@ -51,6 +53,20 @@ class RecruitingController implements RequestHandlerInterface
     /** Lock window: don't re-dispatch a refresh while another is in flight. */
     private const REFRESH_LOCK_SECONDS = 90;
 
+    /**
+     * Cold-cache single-flight window. Held while one request does the
+     * inline CFBD + On3 fetch (~22 s worst case). Generous enough to cover
+     * that, short enough to self-heal if the holder dies mid-fetch.
+     */
+    private const COLD_LOCK_SECONDS = 30;
+
+    /**
+     * How long a concurrent cold request will block waiting for the
+     * in-flight fetch before giving up and telling the client to retry.
+     * Kept short so PHP-FPM workers aren't tied up for the full fetch.
+     */
+    private const COLD_WAIT_SECONDS = 5;
+
     public function __construct(
         private SettingsRepositoryInterface $settings,
         private CacheRepository             $cache,
@@ -92,9 +108,9 @@ class RecruitingController implements RequestHandlerInterface
             if (! is_array($cached) || ! isset($cached['data'], $cached['fetched_at'])) {
                 // First-ever request for this query: inline fetch is the
                 // only option (we have nothing to serve while a job runs).
-                // Subsequent requests use the stale-while-revalidate path
-                // below.
-                return $this->serveInline($cacheKey, $apiKey, $year, $team, $maxRecruits);
+                // Guarded by a single-flight lock so N concurrent cold
+                // requests don't each spawn their own CFBD + On3 round-trip.
+                return $this->serveCold($cacheKey, $apiKey, $year, $team, $maxRecruits);
             }
 
             $age      = time() - (int) $cached['fetched_at'];
@@ -129,6 +145,77 @@ class RecruitingController implements RequestHandlerInterface
                 'error' => 'unexpected_error',
             ]);
         }
+    }
+
+    /**
+     * Cold-cache path with single-flight protection. At most one request
+     * runs the inline CFBD + On3 fetch for a given query; concurrent callers
+     * wait briefly for it to populate the cache and serve that, or return a
+     * 202 "warming_up" so the frontend retries — never a stampede.
+     *
+     * Prefers an atomic cache lock (auto-releases on crash, lets waiters
+     * block). Falls back to an add()-based mutex on the rare store that
+     * doesn't provide atomic locks.
+     */
+    private function serveCold(string $cacheKey, string $apiKey, string $year, string $team, int $maxRecruits): ResponseInterface
+    {
+        $store = $this->cache->getStore();
+
+        if ($store instanceof LockProvider) {
+            $lock = $this->cache->lock('ernestdefoe-recruiting.cold.' . $cacheKey, self::COLD_LOCK_SECONDS);
+
+            try {
+                // Block until it's our turn (or the fetch is taking too long).
+                $lock->block(self::COLD_WAIT_SECONDS);
+            } catch (LockTimeoutException $e) {
+                // Another request is mid-fetch and slow — serve whatever it
+                // has produced so far, else ask the client to retry.
+                return $this->serveFreshOrRetry($cacheKey, $year);
+            }
+
+            try {
+                // The previous holder may have already populated the cache.
+                $cached = $this->cache->get($cacheKey);
+                if (is_array($cached) && isset($cached['data'], $cached['fetched_at'])) {
+                    return $this->jsonRecruits($cached['data'], $year);
+                }
+
+                return $this->serveInline($cacheKey, $apiKey, $year, $team, $maxRecruits);
+            } finally {
+                $lock->release();
+            }
+        }
+
+        // Fallback single-flight for stores without atomic locks.
+        $mutexKey = $cacheKey . '.cold';
+        if (! $this->cache->add($mutexKey, '1', self::COLD_LOCK_SECONDS)) {
+            return $this->serveFreshOrRetry($cacheKey, $year);
+        }
+
+        try {
+            return $this->serveInline($cacheKey, $apiKey, $year, $team, $maxRecruits);
+        } finally {
+            $this->cache->forget($mutexKey);
+        }
+    }
+
+    /**
+     * Re-read the cache (the in-flight cold fetch may have finished) and
+     * serve it if present, otherwise return a 202 telling the frontend to
+     * retry shortly rather than launching a competing fetch.
+     */
+    private function serveFreshOrRetry(string $cacheKey, string $year): ResponseInterface
+    {
+        $cached = $this->cache->get($cacheKey);
+        if (is_array($cached) && isset($cached['data'], $cached['fetched_at'])) {
+            return $this->jsonRecruits($cached['data'], $year);
+        }
+
+        return new JsonResponse([
+            'data'  => [],
+            'year'  => (int) $year,
+            'error' => 'warming_up',
+        ], 202);
     }
 
     /**
