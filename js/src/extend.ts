@@ -1,5 +1,9 @@
 import app from 'flarum/admin/app';
 import Admin from 'flarum/common/extenders/Admin';
+import extractText from 'flarum/common/utils/extractText';
+
+const KEY = 'ernestdefoe-recruiting.admin.settings.';
+const t = (k: string, params: Record<string, unknown> = {}): string => extractText(app.translator.trans(KEY + k, params));
 
 /**
  * Human-readable status line for the last successful On3 scrape, read from
@@ -12,88 +16,70 @@ function lastScrapeNote(): string {
   const count = settings['ernestdefoe-recruiting.on3_last_count'];
 
   if (!ts) {
-    return 'On3 headshots have not been fetched yet.';
+    return t('on3_never');
   }
 
   const when = new Date(Number(ts) * 1000).toLocaleString();
-  return `Last successful On3 scrape: ${when}${count ? ` (${count} players)` : ''}.`;
+  return count ? t('on3_last_with_count', { when, count }) : t('on3_last', { when });
 }
 
 /**
  * Admin extender — registers settings fields on the extension's settings
- * page in the Flarum admin panel.  Each .setting() call takes a function
- * that returns the field config object (Flarum 2 canonical pattern).
+ * page in the Flarum admin panel. Each .setting() call takes a function
+ * that returns the field config object (Flarum 2 canonical pattern). All
+ * user-facing text is resolved through the translator (locale/en.yml).
  */
 export default [
   new Admin()
-
-    // ── Required ────────────────────────────────────────────────────────────
     .setting(() => ({
-      setting:     'ernestdefoe-recruiting.api_key',
-      label:       'College Football Data API Key',
-      help:        'Free API key from collegefootballdata.com — required to fetch recruiting data.',
-      type:        'text',
-      placeholder: 'Paste your CFBD bearer token here',
+      setting: 'ernestdefoe-recruiting.api_key',
+      label: t('api_key_label'),
+      help: t('api_key_help'),
+      type: 'text',
+      placeholder: t('api_key_placeholder'),
     }))
-
-    // ── Recruiting class year ────────────────────────────────────────────────
     .setting(() => ({
-      setting:     'ernestdefoe-recruiting.year',
-      label:       'Recruiting Year',
-      help:        'Which recruiting class to display. Leave blank to always show the current calendar year.',
-      type:        'text',
+      setting: 'ernestdefoe-recruiting.year',
+      label: t('year_label'),
+      help: t('year_help'),
+      type: 'text',
       placeholder: new Date().getFullYear().toString(),
     }))
-
-    // ── Team filter ──────────────────────────────────────────────────────────
     .setting(() => ({
-      setting:     'ernestdefoe-recruiting.team',
-      label:       'Team Filter',
-      help:        'Show recruits committed to (or being recruited by) a specific team. Leave blank to display national top recruits.',
-      type:        'text',
-      placeholder: 'e.g. Alabama',
+      setting: 'ernestdefoe-recruiting.team',
+      label: t('team_label'),
+      help: t('team_help'),
+      type: 'text',
+      placeholder: t('team_placeholder'),
     }))
-
-    // ── Widget title ─────────────────────────────────────────────────────────
     .setting(() => ({
-      setting:     'ernestdefoe-recruiting.widget_title',
-      label:       'Page / Widget Title',
-      help:        'Heading shown above the recruiting widget and on the /recruiting page. Leave blank to use "Top Recruits".',
-      type:        'text',
-      placeholder: 'Top Recruits',
+      setting: 'ernestdefoe-recruiting.widget_title',
+      label: t('widget_title_label'),
+      help: t('widget_title_help'),
+      type: 'text',
+      placeholder: t('widget_title_placeholder'),
     }))
-
-    // ── Page display ─────────────────────────────────────────────────────────
     .setting(() => ({
-      setting:     'ernestdefoe-recruiting.max_recruits',
-      label:       'Max Recruits to Display',
-      help:        'Maximum number of recruits shown on the /recruiting page (1–100). Lower values reduce API response size and page load time.',
-      type:        'number',
+      setting: 'ernestdefoe-recruiting.max_recruits',
+      label: t('max_recruits_label'),
+      help: t('max_recruits_help'),
+      type: 'number',
       placeholder: '25',
-      min:         1,
-      max:         100,
+      min: 1,
+      max: 100,
     }))
-
-    // ── Caching ──────────────────────────────────────────────────────────────
     .setting(() => ({
-      setting:     'ernestdefoe-recruiting.cache_minutes',
-      label:       'Cache Duration (minutes)',
-      help:        'How long to cache CFBD API responses. Recruiting data changes infrequently — 360 (6 hours) is a sensible default.',
-      type:        'number',
+      setting: 'ernestdefoe-recruiting.cache_minutes',
+      label: t('cache_minutes_label'),
+      help: t('cache_minutes_help'),
+      type: 'number',
       placeholder: '360',
-      min:         1,
+      min: 1,
     }))
-
-    // ── On3 headshots ────────────────────────────────────────────────────────
     .setting(() => ({
       setting: 'ernestdefoe-recruiting.photos_enabled',
-      label:   'Enable On3 player headshots',
-      help:
-        "Fetches player photos by scraping On3's public rankings page — one " +
-        'outbound request per recruiting class, cached for 24 hours. Disable to ' +
-        'stop all outbound On3 traffic; recruits then display star-tier initials ' +
-        'avatars instead. ' +
-        lastScrapeNote(),
-      type:    'boolean',
+      label: t('photos_enabled_label'),
+      help: t('photos_enabled_help') + ' ' + lastScrapeNote(),
+      type: 'boolean',
     })),
 ];

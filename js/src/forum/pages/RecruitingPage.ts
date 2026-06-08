@@ -107,8 +107,8 @@ export default class RecruitingPage extends Page {
     // Flarum 2 — the old code silently fell back to '/api'.)
     const base = (app.forum.attribute<string>('baseUrl') || '').replace(/\/$/, '');
 
-    fetch(`${base}/api/cfbd-recruits`, { credentials: 'same-origin' })
-      .then((r) => r.json() as Promise<RecruitsResponse>)
+    app
+      .request<RecruitsResponse>({ method: 'GET', url: `${base}/api/cfbd-recruits` })
       .then((data) => {
         // Cold cache is being warmed by another request — retry shortly
         // rather than rendering an error, up to a bounded number of times.

@@ -54,11 +54,14 @@ class RecruitingController implements RequestHandlerInterface
     private const REFRESH_LOCK_SECONDS = 90;
 
     /**
-     * Cold-cache single-flight window. Held while one request does the
-     * inline CFBD + On3 fetch (~22 s worst case). Generous enough to cover
-     * that, short enough to self-heal if the holder dies mid-fetch.
+     * Cold-cache single-flight window. Held while one request does the inline
+     * fetch. Worst case is sequential CFBD (connect 5 + read 10 = 15 s) + On3
+     * (connect 5 + read 12 = 17 s) ≈ 32 s, so a 30 s lock could expire
+     * mid-fetch and let a second request stampede. 60 s comfortably covers the
+     * combined worst case (plus map-building overhead) while still self-healing
+     * within a minute if the holder dies.
      */
-    private const COLD_LOCK_SECONDS = 30;
+    private const COLD_LOCK_SECONDS = 60;
 
     /**
      * How long a concurrent cold request will block waiting for the
@@ -79,9 +82,7 @@ class RecruitingController implements RequestHandlerInterface
     public function handle(ServerRequestInterface $request): ResponseInterface
     {
         $actor = RequestUtil::getActor($request);
-        if ($actor->isGuest()) {
-            return new JsonResponse(['error' => 'unauthenticated'], 401);
-        }
+        $actor->assertRegistered();
 
         $apiKey       = trim((string) $this->settings->get('ernestdefoe-recruiting.api_key', ''));
         $year         = trim((string) $this->settings->get('ernestdefoe-recruiting.year', ''));
