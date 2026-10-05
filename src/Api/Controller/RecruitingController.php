@@ -70,6 +70,14 @@ class RecruitingController implements RequestHandlerInterface
      */
     private const COLD_WAIT_SECONDS = 5;
 
+    /**
+     * How long a failed cold fetch is remembered. Without it, a bad key, an
+     * exhausted quota or a CFBD outage made EVERY visit to the page another
+     * outbound call (each up to 15 s, each spending the free tier's 1,000 a
+     * month), because nothing was cached to serve instead.
+     */
+    private const FAILURE_SECONDS = 300;
+
     public function __construct(
         private SettingsRepositoryInterface $settings,
         private CacheRepository             $cache,
@@ -107,6 +115,14 @@ class RecruitingController implements RequestHandlerInterface
             $cached = $this->cache->get($cacheKey);
 
             if (! is_array($cached) || ! isset($cached['data'], $cached['fetched_at'])) {
+                // A cold fetch that just failed is not retried on every
+                // visit. Keyed by the API key too, so fixing the key in
+                // the admin panel takes effect at once.
+                $failed = $this->cache->get($this->failureKey($cacheKey, $apiKey));
+                if (is_string($failed) && $failed !== '') {
+                    throw new \RuntimeException($failed);
+                }
+
                 // First-ever request for this query: inline fetch is the
                 // only option (we have nothing to serve while a job runs).
                 // Guarded by a single-flight lock so N concurrent cold
@@ -226,7 +242,13 @@ class RecruitingController implements RequestHandlerInterface
      */
     private function serveInline(string $cacheKey, string $apiKey, string $year, string $team, int $maxRecruits): ResponseInterface
     {
-        $data = $this->cfbd->fetchRecruits($apiKey, $year, $team, $maxRecruits);
+        try {
+            $data = $this->cfbd->fetchRecruits($apiKey, $year, $team, $maxRecruits);
+        } catch (\RuntimeException $e) {
+            $this->cache->put($this->failureKey($cacheKey, $apiKey), $e->getMessage(), self::FAILURE_SECONDS);
+
+            throw $e;
+        }
 
         // Pre-enrich before storing so every subsequent serve-from-cache
         // path (including the stale-while-revalidate branch above) reads
@@ -253,5 +275,10 @@ class RecruitingController implements RequestHandlerInterface
             'data' => $data,
             'year' => (int) $year,
         ]);
+    }
+
+    private function failureKey(string $cacheKey, string $apiKey): string
+    {
+        return $cacheKey . '.failed.' . md5($apiKey);
     }
 }

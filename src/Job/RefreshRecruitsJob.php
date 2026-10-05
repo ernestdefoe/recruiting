@@ -62,6 +62,12 @@ class RefreshRecruitsJob implements ShouldQueue
                 'team'      => $this->team,
                 'exception' => $e,
             ]);
+
+            // Hold the controller's refresh gate for a while rather than its
+            // usual 90 s, so an outage is retried every few minutes instead
+            // of on the next page view after every lock expiry.
+            $cache->put($this->cacheKey . '.refreshing', '1', 300);
+
             return;
         }
 
