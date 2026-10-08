@@ -25,7 +25,7 @@ class RecruitingServiceProvider extends AbstractServiceProvider
     {
         $this->container->bind(ClientInterface::class, fn () => new Client([
             'connect_timeout' => 5,
-            'http_errors'     => false,
+            'http_errors' => false,
         ]));
     }
 }

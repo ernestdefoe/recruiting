@@ -31,7 +31,7 @@ class RefreshRecruitsJob implements ShouldQueue
     use Queueable;
     use SerializesModels;
 
-    public int $tries   = 1;
+    public int $tries = 1;
     public int $timeout = 60;
 
     public function __construct(
@@ -39,15 +39,16 @@ class RefreshRecruitsJob implements ShouldQueue
         private readonly string $apiKey,
         private readonly string $year,
         private readonly string $team,
-        private readonly int    $maxRecruits,
-        private readonly int    $retentionSeconds,
-    ) {}
+        private readonly int $maxRecruits,
+        private readonly int $retentionSeconds,
+    ) {
+    }
 
     public function handle(
-        CfbdClient       $cfbd,
+        CfbdClient $cfbd,
         On3PhotoEnricher $photos,
-        CacheRepository  $cache,
-        LoggerInterface  $log,
+        CacheRepository $cache,
+        LoggerInterface $log,
     ): void {
         try {
             $data = $cfbd->fetchRecruits($this->apiKey, $this->year, $this->team, $this->maxRecruits);
@@ -56,15 +57,15 @@ class RefreshRecruitsJob implements ShouldQueue
             // data on a CFBD blip — the operator wants the last good
             // payload to keep serving while we recover. Just log.
             $log->warning('[recruiting] RefreshRecruitsJob: CFBD fetch failed', [
-                'year'      => $this->year,
-                'team'      => $this->team,
+                'year' => $this->year,
+                'team' => $this->team,
                 'exception' => $e,
             ]);
 
             // Hold the controller's refresh gate for a while rather than its
             // usual 90 s, so an outage is retried every few minutes instead
             // of on the next page view after every lock expiry.
-            $cache->put($this->cacheKey . '.refreshing', '1', 300);
+            $cache->put($this->cacheKey.'.refreshing', '1', 300);
 
             return;
         }
@@ -82,7 +83,7 @@ class RefreshRecruitsJob implements ShouldQueue
         // data can still be served if every refresh attempt fails
         // — better than an empty page.
         $cache->put($this->cacheKey, [
-            'data'       => $data,
+            'data' => $data,
             'fetched_at' => time(),
         ], $this->retentionSeconds);
     }

@@ -19,11 +19,11 @@ use GuzzleHttp\Exception\RequestException;
  */
 class CfbdClient
 {
-    private const BASE_URL  = 'https://api.collegefootballdata.com';
+    private const BASE_URL = 'https://api.collegefootballdata.com';
     private const USER_AGENT = 'FBSFB/1.0 (Flarum extension)';
 
     /** Per-request timeouts (seconds) — match the original client defaults. */
-    private const TIMEOUT         = 10;
+    private const TIMEOUT = 10;
     private const CONNECT_TIMEOUT = 5;
 
     public function __construct(private ClientInterface $http)
@@ -46,16 +46,16 @@ class CfbdClient
         }
 
         try {
-            $response = $this->http->request('GET', self::BASE_URL . '/recruiting/players', [
+            $response = $this->http->request('GET', self::BASE_URL.'/recruiting/players', [
                 'headers' => [
-                    'Authorization' => 'Bearer ' . $apiKey,
-                    'Accept'        => 'application/json',
-                    'User-Agent'    => self::USER_AGENT,
+                    'Authorization' => 'Bearer '.$apiKey,
+                    'Accept' => 'application/json',
+                    'User-Agent' => self::USER_AGENT,
                 ],
-                'query'           => $query,
-                'timeout'         => self::TIMEOUT,
+                'query' => $query,
+                'timeout' => self::TIMEOUT,
                 'connect_timeout' => self::CONNECT_TIMEOUT,
-                'http_errors'     => false,
+                'http_errors' => false,
             ]);
         } catch (RequestException $e) {
             throw new \RuntimeException('cfbd_unreachable');
@@ -67,7 +67,7 @@ class CfbdClient
             throw new \RuntimeException('invalid_api_key');
         }
         if ($status !== 200) {
-            throw new \RuntimeException('cfbd_error_' . $status);
+            throw new \RuntimeException('cfbd_error_'.$status);
         }
 
         $raw = json_decode((string) $response->getBody(), true);
@@ -92,10 +92,10 @@ class CfbdClient
     private function transform(array $r): array
     {
         $heightIn = isset($r['height']) ? (int) $r['height'] : null;
-        $height   = $heightIn ? sprintf("%d'%d\"", intdiv($heightIn, 12), $heightIn % 12) : null;
+        $height = $heightIn ? sprintf("%d'%d\"", intdiv($heightIn, 12), $heightIn % 12) : null;
 
-        $city     = $r['city']          ?? null;
-        $state    = $r['stateProvince'] ?? null;
+        $city = $r['city'] ?? null;
+        $state = $r['stateProvince'] ?? null;
         $hometown = implode(', ', array_filter([$city, $state])) ?: null;
 
         $committedTo = isset($r['committedTo']) && $r['committedTo'] !== ''
@@ -103,24 +103,24 @@ class CfbdClient
             : null;
 
         return [
-            'id'          => $r['id']          ?? null,
-            'athleteId'   => isset($r['athleteId']) ? (int) $r['athleteId'] : null,
-            'name'        => $r['name']        ?? 'Unknown',
-            'position'    => isset($r['position']) ? strtoupper((string) $r['position']) : null,
-            'height'      => $height,
-            'weight'      => isset($r['weight']) ? ((int) $r['weight']) . ' lbs' : null,
-            'city'        => $city,
-            'state'       => $state,
-            'hometown'    => $hometown,
-            'country'     => isset($r['country']) && $r['country'] !== 'USA' ? (string) $r['country'] : null,
-            'stars'       => isset($r['stars'])   ? (int)   $r['stars']   : null,
-            'rating'      => isset($r['rating'])  ? round((float) $r['rating'], 4) : null,
-            'ranking'     => isset($r['ranking']) ? (int)   $r['ranking'] : null,
-            'status'      => $committedTo ? 'committed' : 'undecided',
-            'school'      => $committedTo,
-            'highSchool'  => $r['school']      ?? null,
+            'id' => $r['id'] ?? null,
+            'athleteId' => isset($r['athleteId']) ? (int) $r['athleteId'] : null,
+            'name' => $r['name'] ?? 'Unknown',
+            'position' => isset($r['position']) ? strtoupper((string) $r['position']) : null,
+            'height' => $height,
+            'weight' => isset($r['weight']) ? ((int) $r['weight']).' lbs' : null,
+            'city' => $city,
+            'state' => $state,
+            'hometown' => $hometown,
+            'country' => isset($r['country']) && $r['country'] !== 'USA' ? (string) $r['country'] : null,
+            'stars' => isset($r['stars']) ? (int) $r['stars'] : null,
+            'rating' => isset($r['rating']) ? round((float) $r['rating'], 4) : null,
+            'ranking' => isset($r['ranking']) ? (int) $r['ranking'] : null,
+            'status' => $committedTo ? 'committed' : 'undecided',
+            'school' => $committedTo,
+            'highSchool' => $r['school'] ?? null,
             'recruitType' => $r['recruitType'] ?? 'HighSchool',
-            'photoUrl'    => null, // filled in by On3PhotoEnricher
+            'photoUrl' => null, // filled in by On3PhotoEnricher
         ];
     }
 }

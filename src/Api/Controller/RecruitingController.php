@@ -18,7 +18,7 @@ use Psr\Http\Server\RequestHandlerInterface;
 use Psr\Log\LoggerInterface;
 
 /**
- * GET /api/cfbd-recruits
+ * GET /api/cfbd-recruits.
  *
  * Thin orchestrator. Resolves settings, checks the cache envelope,
  * decides whether to serve fresh / serve stale + refresh / fetch
@@ -80,36 +80,37 @@ class RecruitingController implements RequestHandlerInterface
 
     public function __construct(
         private SettingsRepositoryInterface $settings,
-        private CacheRepository             $cache,
-        private LoggerInterface             $log,
-        private CfbdClient                  $cfbd,
-        private On3PhotoEnricher            $photos,
-        private BusDispatcher               $bus,
-    ) {}
+        private CacheRepository $cache,
+        private LoggerInterface $log,
+        private CfbdClient $cfbd,
+        private On3PhotoEnricher $photos,
+        private BusDispatcher $bus,
+    ) {
+    }
 
     public function handle(ServerRequestInterface $request): ResponseInterface
     {
         $actor = RequestUtil::getActor($request);
         $actor->assertRegistered();
 
-        $apiKey       = trim((string) $this->settings->get('ernestdefoe-recruiting.api_key', ''));
-        $year         = trim((string) $this->settings->get('ernestdefoe-recruiting.year', ''));
-        $team         = trim((string) $this->settings->get('ernestdefoe-recruiting.team', ''));
-        $maxRecruits  = max(1, min(100, (int) $this->settings->get('ernestdefoe-recruiting.max_recruits', 25)));
-        $softTtl      = max(60, (int) $this->settings->get('ernestdefoe-recruiting.cache_minutes', 360) * 60);
+        $apiKey = trim((string) $this->settings->get('ernestdefoe-recruiting.api_key', ''));
+        $year = trim((string) $this->settings->get('ernestdefoe-recruiting.year', ''));
+        $team = trim((string) $this->settings->get('ernestdefoe-recruiting.team', ''));
+        $maxRecruits = max(1, min(100, (int) $this->settings->get('ernestdefoe-recruiting.max_recruits', 25)));
+        $softTtl = max(60, (int) $this->settings->get('ernestdefoe-recruiting.cache_minutes', 360) * 60);
 
         if (! $apiKey) {
             return new JsonResponse([
-                'data'  => [],
-                'year'  => (int) ($year ?: date('Y')),
+                'data' => [],
+                'year' => (int) ($year ?: date('Y')),
                 'error' => 'api_key_missing',
             ]);
         }
 
         $year = $year !== '' && preg_match('/^\d{4}$/', $year) ? $year : (string) date('Y');
 
-        $cacheKey = 'ernestdefoe-recruiting.' . md5("{$year}|{$team}|{$maxRecruits}");
-        $lockKey  = $cacheKey . '.refreshing';
+        $cacheKey = 'ernestdefoe-recruiting.'.md5("{$year}|{$team}|{$maxRecruits}");
+        $lockKey = $cacheKey.'.refreshing';
 
         try {
             $cached = $this->cache->get($cacheKey);
@@ -130,8 +131,8 @@ class RecruitingController implements RequestHandlerInterface
                 return $this->serveCold($cacheKey, $apiKey, $year, $team, $maxRecruits);
             }
 
-            $age      = time() - (int) $cached['fetched_at'];
-            $isStale  = $age > $softTtl;
+            $age = time() - (int) $cached['fetched_at'];
+            $isStale = $age > $softTtl;
 
             if ($isStale && $this->cache->add($lockKey, '1', self::REFRESH_LOCK_SECONDS)) {
                 // Stale, and no other worker has already taken the lock —
@@ -150,15 +151,16 @@ class RecruitingController implements RequestHandlerInterface
         } catch (\RuntimeException $e) {
             // Stable error codes from CfbdClient → pass through verbatim.
             return new JsonResponse([
-                'data'  => [],
-                'year'  => (int) $year,
+                'data' => [],
+                'year' => (int) $year,
                 'error' => $e->getMessage(),
             ]);
         } catch (\Throwable $e) {
-            $this->log->error('[recruiting] RecruitingController: ' . $e->getMessage(), ['exception' => $e]);
+            $this->log->error('[recruiting] RecruitingController: '.$e->getMessage(), ['exception' => $e]);
+
             return new JsonResponse([
-                'data'  => [],
-                'year'  => (int) $year,
+                'data' => [],
+                'year' => (int) $year,
                 'error' => 'unexpected_error',
             ]);
         }
@@ -179,7 +181,7 @@ class RecruitingController implements RequestHandlerInterface
         $store = $this->cache->getStore();
 
         if ($store instanceof LockProvider) {
-            $lock = $this->cache->lock('ernestdefoe-recruiting.cold.' . $cacheKey, self::COLD_LOCK_SECONDS);
+            $lock = $this->cache->lock('ernestdefoe-recruiting.cold.'.$cacheKey, self::COLD_LOCK_SECONDS);
 
             try {
                 // Block until it's our turn (or the fetch is taking too long).
@@ -204,7 +206,7 @@ class RecruitingController implements RequestHandlerInterface
         }
 
         // Fallback single-flight for stores without atomic locks.
-        $mutexKey = $cacheKey . '.cold';
+        $mutexKey = $cacheKey.'.cold';
         if (! $this->cache->add($mutexKey, '1', self::COLD_LOCK_SECONDS)) {
             return $this->serveFreshOrRetry($cacheKey, $year);
         }
@@ -229,8 +231,8 @@ class RecruitingController implements RequestHandlerInterface
         }
 
         return new JsonResponse([
-            'data'  => [],
-            'year'  => (int) $year,
+            'data' => [],
+            'year' => (int) $year,
             'error' => 'warming_up',
         ], 202);
     }
@@ -256,7 +258,7 @@ class RecruitingController implements RequestHandlerInterface
         $data = $this->photos->enrich($data, $year);
 
         $this->cache->put($cacheKey, [
-            'data'       => $data,
+            'data' => $data,
             'fetched_at' => time(),
         ], self::HARD_RETENTION_SECONDS);
 
@@ -279,6 +281,6 @@ class RecruitingController implements RequestHandlerInterface
 
     private function failureKey(string $cacheKey, string $apiKey): string
     {
-        return $cacheKey . '.failed.' . md5($apiKey);
+        return $cacheKey.'.failed.'.md5($apiKey);
     }
 }

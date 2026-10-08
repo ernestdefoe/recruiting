@@ -26,11 +26,11 @@ use Psr\Log\LoggerInterface;
 class On3PhotoEnricher
 {
     private const RANKINGS_URL = 'https://www.on3.com/rivals/rankings/player/football/';
-    private const STATIC_HOST  = 'https://on3static.com';
-    private const CACHE_TTL    = 24 * 3600;
+    private const STATIC_HOST = 'https://on3static.com';
+    private const CACHE_TTL = 24 * 3600;
 
     /** Per-request timeouts (seconds) for the rankings fetch. */
-    private const TIMEOUT         = 12;
+    private const TIMEOUT = 12;
     private const CONNECT_TIMEOUT = 5;
 
     /**
@@ -51,7 +51,7 @@ class On3PhotoEnricher
 
     /** Persisted setting keys for the admin "last scrape" status display. */
     private const LAST_SCRAPE_KEY = 'ernestdefoe-recruiting.on3_last_scrape';
-    private const LAST_COUNT_KEY  = 'ernestdefoe-recruiting.on3_last_count';
+    private const LAST_COUNT_KEY = 'ernestdefoe-recruiting.on3_last_count';
 
     public function __construct(
         private CacheRepository $cache,
@@ -85,6 +85,7 @@ class On3PhotoEnricher
         return array_map(function ($r) use ($imageMap) {
             $slug = $this->nameToSlug((string) ($r['name'] ?? ''));
             $r['photoUrl'] = $imageMap[$slug] ?? null;
+
             return $r;
         }, $recruits);
     }
@@ -108,6 +109,7 @@ class On3PhotoEnricher
         if (! empty($map)) {
             $this->cache->put($cacheKey, $map, self::CACHE_TTL);
         }
+
         return $map;
     }
 
@@ -121,27 +123,29 @@ class On3PhotoEnricher
     private function build(string $year): array
     {
         try {
-            $response = $this->http->request('GET', self::RANKINGS_URL . $year . '/', [
-                'timeout'         => self::TIMEOUT,
+            $response = $this->http->request('GET', self::RANKINGS_URL.$year.'/', [
+                'timeout' => self::TIMEOUT,
                 'connect_timeout' => self::CONNECT_TIMEOUT,
                 'allow_redirects' => ['max' => 5],
-                'http_errors'     => false,
-                'headers'         => [
+                'http_errors' => false,
+                'headers' => [
                     'User-Agent' => self::USER_AGENT,
-                    'Accept'     => 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                    'Accept' => 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
                 ],
             ]);
         } catch (\Throwable $e) {
             $this->log->warning('[recruiting] On3 rankings fetch failed', ['exception' => $e]);
+
             return [];
         }
 
         if ($response->getStatusCode() !== 200) {
-            $this->log->warning('[recruiting] On3 rankings HTTP ' . $response->getStatusCode());
+            $this->log->warning('[recruiting] On3 rankings HTTP '.$response->getStatusCode());
+
             return [];
         }
 
-        $map   = $this->parse((string) $response->getBody());
+        $map = $this->parse((string) $response->getBody());
         $count = count($map);
 
         if ($count > 0) {
@@ -154,12 +158,12 @@ class On3PhotoEnricher
             // Fetch succeeded (HTTP 200) but the proximity parser found
             // almost nothing — On3's page layout has likely changed and is
             // silently breaking headshots. Surface it instead of failing mute.
-            $this->log->warning('[recruiting] On3 rankings parsed only ' . $count
-                . ' players (expected >= ' . self::MIN_EXPECTED_PLAYERS
-                . ') — On3 page layout may have changed', ['year' => $year]);
+            $this->log->warning('[recruiting] On3 rankings parsed only '.$count
+                .' players (expected >= '.self::MIN_EXPECTED_PLAYERS
+                .') — On3 page layout may have changed', ['year' => $year]);
         } else {
             $this->log->info('[recruiting] On3 image map built', [
-                'year'    => $year,
+                'year' => $year,
                 'players' => $count,
             ]);
         }
@@ -183,7 +187,7 @@ class On3PhotoEnricher
     private function parse(string $html): array
     {
         $imgPattern = '~https://on3static\.com(?:/cdn-cgi/image/[^\s"\'>\]]+)?'
-                    . '(/uploads/assets/\d+/\d+/\d+\.(?:jpg|jpeg|png|webp))~i';
+                    .'(/uploads/assets/\d+/\d+/\d+\.(?:jpg|jpeg|png|webp))~i';
 
         preg_match_all($imgPattern, $html, $imgAll, PREG_OFFSET_CAPTURE);
         preg_match_all(
@@ -197,7 +201,7 @@ class On3PhotoEnricher
             return [];
         }
 
-        $map  = [];
+        $map = [];
         $seen = [];
 
         foreach ($hrefAll[0] as $i => [, $hrefPos]) {
@@ -220,7 +224,7 @@ class On3PhotoEnricher
             }
 
             if ($bestPath !== null && $bestDist < 5000) {
-                $map[$nameSlug] = self::STATIC_HOST . $bestPath;
+                $map[$nameSlug] = self::STATIC_HOST.$bestPath;
             }
         }
 
@@ -229,12 +233,13 @@ class On3PhotoEnricher
 
     /**
      * "Jared Curtis" → "jared-curtis"
-     * "C.J. Stroud"  → "cj-stroud"
+     * "C.J. Stroud"  → "cj-stroud".
      */
     private function nameToSlug(string $name): string
     {
         $slug = strtolower(trim($name));
         $slug = preg_replace('/[^a-z0-9]+/', '-', $slug);
+
         return trim($slug, '-');
     }
 
