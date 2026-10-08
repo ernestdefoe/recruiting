@@ -43,8 +43,6 @@ return [
         ->serializeToForum(
             'ernestdefoe-recruiting.widget_title',
             'ernestdefoe-recruiting.widget_title',
-            null,
-            null,
         )
         ->default('ernestdefoe-recruiting.api_key',       '')
         ->default('ernestdefoe-recruiting.year',          '')
