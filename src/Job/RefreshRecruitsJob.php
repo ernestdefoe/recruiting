@@ -7,7 +7,6 @@ use Ernestdefoe\Recruiting\Service\On3PhotoEnricher;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Cache\Repository as CacheRepository;
 use Illuminate\Contracts\Queue\ShouldQueue;
-use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Psr\Log\LoggerInterface;
@@ -28,7 +27,6 @@ use Psr\Log\LoggerInterface;
  */
 class RefreshRecruitsJob implements ShouldQueue
 {
-    use Dispatchable;
     use InteractsWithQueue;
     use Queueable;
     use SerializesModels;
