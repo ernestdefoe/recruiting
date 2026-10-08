@@ -196,19 +196,12 @@ export default class RecruitingPage extends Page {
   // ── View ────────────────────────────────────────────────────────────────────
 
   view(): Mithril.Children {
-    return m('.GNPage', [
-      this.viewHero(),
-      m(
-        '.GNPage-body',
-        this.loading ? this.viewLoading() : this.error ? this.viewError() : this.viewContent()
-      ),
-    ]);
+    return m('.GNPage', [this.viewHero(), m('.GNPage-body', this.loading ? this.viewLoading() : this.error ? this.viewError() : this.viewContent())]);
   }
 
   viewHero(): Mithril.Children {
     const titleSetting = app.forum.attribute<string | undefined>('ernestdefoe-recruiting.widget_title');
-    const baseTitle =
-      typeof titleSetting === 'string' && titleSetting.trim() !== '' ? titleSetting.trim() : trans('title');
+    const baseTitle = typeof titleSetting === 'string' && titleSetting.trim() !== '' ? titleSetting.trim() : trans('title');
     const yearLabel = this.year ? ` — ${this.year} ${trans('class_suffix')}` : '';
     return m('.GNPage-hero', [
       m('.GNPage-hero-inner', [
@@ -227,24 +220,16 @@ export default class RecruitingPage extends Page {
       return m('.GNPage-state.GNPage-state--warn', [m('i.fa-solid.fa-key'), m('p', trans('configure'))]);
     }
     if (this.error === 'invalid_api_key') {
-      return m('.GNPage-state.GNPage-state--warn', [
-        m('i.fa-solid.fa-triangle-exclamation'),
-        m('p', trans('invalid_key')),
-      ]);
+      return m('.GNPage-state.GNPage-state--warn', [m('i.fa-solid.fa-triangle-exclamation'), m('p', trans('invalid_key'))]);
     }
-    return m('.GNPage-state.GNPage-state--warn', [
-      m('i.fa-solid.fa-circle-exclamation'),
-      m('p', trans('unavailable')),
-    ]);
+    return m('.GNPage-state.GNPage-state--warn', [m('i.fa-solid.fa-circle-exclamation'), m('p', trans('unavailable'))]);
   }
 
   viewContent(): Mithril.Children {
     const recruits = this.filtered();
 
     const committed = recruits.filter((r) => r.status === 'committed').length;
-    const avgRating = recruits.length
-      ? (recruits.reduce((s, r) => s + (r.rating || 0), 0) / recruits.length).toFixed(4)
-      : null;
+    const avgRating = recruits.length ? (recruits.reduce((s, r) => s + (r.rating || 0), 0) / recruits.length).toFixed(4) : null;
 
     return [
       this.viewFilters(),
@@ -290,10 +275,7 @@ export default class RecruitingPage extends Page {
             m.redraw();
           },
         },
-        [
-          m('option', { value: '' }, trans('all_positions')),
-          ...positions.map((p) => m('option', { value: p }, p)),
-        ]
+        [m('option', { value: '' }, trans('all_positions')), ...positions.map((p) => m('option', { value: p }, p))]
       ),
 
       m(
@@ -361,26 +343,16 @@ export default class RecruitingPage extends Page {
         r.highSchool ? m('.GNR-detail', [m('i.fa-solid.fa-school'), ' ', r.highSchool]) : null,
 
         r.hometown
-          ? m('.GNR-detail', [
-              m('i.fa-solid.fa-location-dot'),
-              ' ',
-              r.hometown,
-              r.country ? m('span.GNR-country', ` · ${r.country}`) : null,
-            ])
+          ? m('.GNR-detail', [m('i.fa-solid.fa-location-dot'), ' ', r.hometown, r.country ? m('span.GNR-country', ` · ${r.country}`) : null])
           : null,
 
-        r.recruitType && r.recruitType !== 'HighSchool'
-          ? m('span.GNR-typeBadge', r.recruitType.replace(/([A-Z])/g, ' $1').trim())
-          : null,
+        r.recruitType && r.recruitType !== 'HighSchool' ? m('span.GNR-typeBadge', r.recruitType.replace(/([A-Z])/g, ' $1').trim()) : null,
       ]),
 
       // Footer — commitment pill
       m('.GNR-footer', [
         r.status === 'committed'
-          ? m('span.GNR-commit.GNR-commit--committed', [
-              m('i.fa-solid.fa-circle-check'),
-              ` ${r.school || 'Committed'}`,
-            ])
+          ? m('span.GNR-commit.GNR-commit--committed', [m('i.fa-solid.fa-circle-check'), ` ${r.school || 'Committed'}`])
           : m('span.GNR-commit.GNR-commit--undecided', [m('i.fa-regular.fa-circle'), ' Undecided']),
       ]),
     ]);

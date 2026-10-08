@@ -12,10 +12,14 @@ app.initializers.add('ernestdefoe-recruiting', () => {
   extend(IndexSidebar.prototype, 'navItems', function (items) {
     items.add(
       'ernestdefoe-recruiting',
-      m(LinkButton, {
-        href: app.route('recruiting'),
-        icon: 'fa-solid fa-star',
-      }, app.translator.trans('ernestdefoe-recruiting.forum.nav.label')),
+      m(
+        LinkButton,
+        {
+          href: app.route('recruiting'),
+          icon: 'fa-solid fa-star',
+        },
+        app.translator.trans('ernestdefoe-recruiting.forum.nav.label')
+      ),
       -10
     );
   });
