@@ -37,6 +37,8 @@ ernestdefoe-recruiting:
       all_recruits: "All Recruits"
       committed_only: "Committed"
       undecided_only: "Undecided"
+      card_committed: "Committed"
+      card_undecided: "Undecided"
       search_placeholder: "Search name, school, city…"
       avg_rating: "Avg Rating"
       committed_count: "Committed"

@@ -352,8 +352,8 @@ export default class RecruitingPage extends Page {
       // Footer — commitment pill
       m('.GNR-footer', [
         r.status === 'committed'
-          ? m('span.GNR-commit.GNR-commit--committed', [m('i.fa-solid.fa-circle-check'), ` ${r.school || 'Committed'}`])
-          : m('span.GNR-commit.GNR-commit--undecided', [m('i.fa-regular.fa-circle'), ' Undecided']),
+          ? m('span.GNR-commit.GNR-commit--committed', [m('i.fa-solid.fa-circle-check'), ` ${r.school || trans('card_committed')}`])
+          : m('span.GNR-commit.GNR-commit--undecided', [m('i.fa-regular.fa-circle'), ' ' + trans('card_undecided')]),
       ]),
     ]);
   }
