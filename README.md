@@ -65,7 +65,7 @@ All settings are found in **Admin → Extensions → FBSFB Recruiting**.
 
 ## How it works
 
-1. A forum member navigates to `/recruiting` (or clicks the **Recruiting** link in the sidebar nav).
+1. A visitor (guests included, unless the forum is closed to guests) navigates to `/recruiting` (or clicks the **Recruiting** link in the sidebar nav).
 2. The JS frontend calls the internal API route `GET /api/cfbd-recruits`.
 3. The PHP controller reads your admin settings and checks Flarum's cache. If the cached payload is fresh it returns immediately. If it's past the soft TTL it dispatches a background refresh job and returns the cached (stale) data immediately — see [Caching & refresh strategy](#caching--refresh-strategy).
 4. The refresh job (`RefreshRecruitsJob`) proxies a request to `https://api.collegefootballdata.com/recruiting/players?year=…&team=…`, sorts results by national ranking, transforms them into the JSON shape, and writes the new payload back to the cache envelope.

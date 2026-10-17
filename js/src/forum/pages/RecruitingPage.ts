@@ -38,8 +38,8 @@ const PAGE_PREFIX = 'ernestdefoe-recruiting.forum.page.';
  * all keys live in locale/en.yml, so a miss returns the key (Flarum's
  * default), which is loud enough to catch in review.
  */
-function trans(suffix: string): string {
-  return app.translator.trans(PAGE_PREFIX + suffix) as string;
+function trans(suffix: string, params: Record<string, unknown> = {}): string {
+  return app.translator.trans(PAGE_PREFIX + suffix, params) as string;
 }
 
 /** Max consecutive 202 "warming_up" retries before showing an error. */
@@ -206,7 +206,7 @@ export default class RecruitingPage extends Page {
     return m('.GNPage-hero', [
       m('.GNPage-hero-inner', [
         m('h1.GNPage-title', [m('i.fa-solid.fa-star'), ` ${baseTitle}${yearLabel}`]),
-        m('p.GNPage-subtitle', trans('subtitle')),
+        m('p.GNPage-subtitle', trans('subtitle', { forum: app.forum.attribute<string>('title') })),
       ]),
     ]);
   }

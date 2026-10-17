@@ -91,7 +91,10 @@ class RecruitingController implements RequestHandlerInterface
     public function handle(ServerRequestInterface $request): ResponseInterface
     {
         $actor = RequestUtil::getActor($request);
-        $actor->assertRegistered();
+        // The board is public data, cached once for everyone, and the page and
+        // its nav link are shown to guests. Gate it on the forum's own view
+        // permission so a forum closed to guests stays closed.
+        $actor->assertCan('viewForum');
 
         $apiKey = trim((string) $this->settings->get('ernestdefoe-recruiting.api_key', ''));
         $year = trim((string) $this->settings->get('ernestdefoe-recruiting.year', ''));

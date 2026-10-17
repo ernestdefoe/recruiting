@@ -4,6 +4,7 @@ namespace Ernestdefoe\Recruiting\Tests\integration\api;
 
 use Flarum\Testing\integration\RetrievesAuthorizedUsers;
 use Flarum\Testing\integration\TestCase;
+use Flarum\Group\Group;
 use Flarum\User\User;
 use GuzzleHttp\Client;
 use GuzzleHttp\ClientInterface;
@@ -82,15 +83,27 @@ class RecruitsTest extends TestCase
     }
 
     #[Test]
-    public function guests_cannot_read_recruits()
+    public function guests_can_read_the_public_board()
     {
         $this->setting('ernestdefoe-recruiting.api_key', 'KEY');
-
         $this->cfbd([$this->player(1, 1)]);
+
+        [$status, $body] = $this->recruits(null);
+
+        $this->assertSame(200, $status, 'The page and its nav link are shown to guests, so the API must answer them');
+        $this->assertSame([1], array_column($body['data'], 'id'));
+    }
+
+    #[Test]
+    public function a_forum_closed_to_guests_does_not_serve_them_recruits()
+    {
+        $this->setting('ernestdefoe-recruiting.api_key', 'KEY');
+        $this->cfbd([$this->player(1, 1)]);
+        $this->database()->table('group_permission')->where('group_id', Group::GUEST_ID)->where('permission', 'viewForum')->delete();
 
         [$status] = $this->recruits(null);
 
-        $this->assertSame(401, $status);
+        $this->assertSame(403, $status);
         $this->assertCount(1, $this->responses, 'CFBD was never asked');
     }
 
