@@ -39,7 +39,7 @@ const PAGE_PREFIX = 'ernestdefoe-recruiting.forum.page.';
  * default), which is loud enough to catch in review.
  */
 function trans(suffix: string, params: Record<string, unknown> = {}): string {
-  return app.translator.trans(PAGE_PREFIX + suffix, params) as string;
+  return app.translator.trans(PAGE_PREFIX + suffix, params, true);
 }
 
 /** Max consecutive 202 "warming_up" retries before showing an error. */
