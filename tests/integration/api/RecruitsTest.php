@@ -2,6 +2,8 @@
 
 namespace Ernestdefoe\Recruiting\Tests\integration\api;
 
+use Ernestdefoe\Recruiting\Job\RefreshRecruitsJob;
+use Flarum\Settings\SettingsRepositoryInterface;
 use Flarum\Testing\integration\RetrievesAuthorizedUsers;
 use Flarum\Testing\integration\TestCase;
 use Flarum\Group\Group;
@@ -186,8 +188,27 @@ class RecruitsTest extends TestCase
 
         // Flarum's default sync queue has run the refresh by now.
         $this->assertCount(1, $this->sent);
+        $this->assertSame('Bearer KEY', $this->sent[0]['request']->getHeaderLine('Authorization'));
         [, $body] = $this->recruits();
         $this->assertSame('New Name', $body['data'][0]['name']);
+    }
+
+    #[Test]
+    public function a_queued_refresh_never_stores_the_key_and_uses_the_current_one()
+    {
+        $this->setting('ernestdefoe-recruiting.api_key', 'OLDKEY');
+        $this->cfbd([$this->player(9, 1)]);
+        $this->boot();
+
+        $payload = serialize(new RefreshRecruitsJob($this->cacheKey(), '2027', '', 25, 3600));
+        $this->assertStringNotContainsString('OLDKEY', $payload, 'Queue payloads (jobs table, Redis) must not hold the API key');
+
+        // The admin changes the key while the job waits in the queue.
+        $this->app()->getContainer()->make(SettingsRepositoryInterface::class)->set('ernestdefoe-recruiting.api_key', 'NEWKEY');
+        $this->app()->getContainer()->call([unserialize($payload), 'handle']);
+
+        $this->assertSame('Bearer NEWKEY', $this->sent[0]['request']->getHeaderLine('Authorization'));
+        $this->assertSame(9, $this->app()->getContainer()->make(Repository::class)->get($this->cacheKey())['data'][0]['id']);
     }
 
     #[Test]

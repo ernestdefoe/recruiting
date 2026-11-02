@@ -11,6 +11,8 @@ use Illuminate\Contracts\Bus\Dispatcher as BusDispatcher;
 use Illuminate\Contracts\Cache\LockProvider;
 use Illuminate\Contracts\Cache\LockTimeoutException;
 use Illuminate\Contracts\Cache\Repository as CacheRepository;
+use Illuminate\Contracts\Queue\Queue;
+use Illuminate\Queue\SyncQueue;
 use Laminas\Diactoros\Response\JsonResponse;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
@@ -39,11 +41,12 @@ use Psr\Log\LoggerInterface;
  *   "refresh-in-flight" cache lock prevents N concurrent workers
  *   from all dispatching the job in the cold-cache stampede.
  *
- *   On Flarum's default `sync` queue driver the job runs inline so
- *   that one unlucky request still pays the CFBD round-trip. With
- *   any real driver (`database`, `redis`, `sqs`) the dispatch
- *   returns immediately and the worker handles the fetch out of
- *   band.
+ *   On Flarum's default `sync` queue driver the job would run inline,
+ *   before the stale data is returned. Under PHP-FPM it is instead run
+ *   after the response has been sent (see dispatchRefresh()), so the
+ *   visitor never waits on CFBD. With any real driver (`database`,
+ *   `redis`, `sqs`) the dispatch returns immediately and the worker
+ *   handles the fetch out of band.
  */
 class RecruitingController implements RequestHandlerInterface
 {
@@ -85,6 +88,7 @@ class RecruitingController implements RequestHandlerInterface
         private CfbdClient $cfbd,
         private On3PhotoEnricher $photos,
         private BusDispatcher $bus,
+        private Queue $queue,
     ) {
     }
 
@@ -140,9 +144,8 @@ class RecruitingController implements RequestHandlerInterface
             if ($isStale && $this->cache->add($lockKey, '1', self::REFRESH_LOCK_SECONDS)) {
                 // Stale, and no other worker has already taken the lock —
                 // dispatch a refresh and serve the stale data immediately.
-                $this->bus->dispatch(new RefreshRecruitsJob(
+                $this->dispatchRefresh(new RefreshRecruitsJob(
                     cacheKey:         $cacheKey,
-                    apiKey:           $apiKey,
                     year:             $year,
                     team:             $team,
                     maxRecruits:      $maxRecruits,
@@ -280,6 +283,32 @@ class RecruitingController implements RequestHandlerInterface
             'data' => $data,
             'year' => (int) $year,
         ]);
+    }
+
+    /**
+     * Queue the refresh. On the sync driver under PHP-FPM, run it only after
+     * the response has gone out: Flarum has no "after response" hook, so a
+     * shutdown function flushes the response with fastcgi_finish_request()
+     * and then runs the job. Elsewhere (a real queue, or a SAPI that can't
+     * finish the request early) it is dispatched as before.
+     */
+    private function dispatchRefresh(RefreshRecruitsJob $job): void
+    {
+        if (! $this->queue instanceof SyncQueue || PHP_SAPI !== 'fpm-fcgi' || ! function_exists('fastcgi_finish_request')) {
+            $this->bus->dispatch($job);
+
+            return;
+        }
+
+        register_shutdown_function(function () use ($job): void {
+            fastcgi_finish_request();
+
+            try {
+                $this->bus->dispatch($job);
+            } catch (\Throwable $e) {
+                $this->log->error('[recruiting] deferred refresh failed: '.$e->getMessage(), ['exception' => $e]);
+            }
+        });
     }
 
     private function failureKey(string $cacheKey, string $apiKey): string

@@ -4,6 +4,7 @@ namespace Ernestdefoe\Recruiting\Job;
 
 use Ernestdefoe\Recruiting\Service\CfbdClient;
 use Ernestdefoe\Recruiting\Service\On3PhotoEnricher;
+use Flarum\Settings\SettingsRepositoryInterface;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Cache\Repository as CacheRepository;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -24,6 +25,10 @@ use Psr\Log\LoggerInterface;
  *
  * Single-flight is enforced by RecruitingController via a short
  * cache lock; the job itself trusts that gate.
+ *
+ * The CFBD API key is read from settings in handle(), never passed in:
+ * job properties are serialized into the queue (jobs table, Redis), and
+ * the key must not be stored there in plain text.
  */
 class RefreshRecruitsJob implements ShouldQueue
 {
@@ -36,7 +41,6 @@ class RefreshRecruitsJob implements ShouldQueue
 
     public function __construct(
         private readonly string $cacheKey,
-        private readonly string $apiKey,
         private readonly string $year,
         private readonly string $team,
         private readonly int $maxRecruits,
@@ -49,9 +53,17 @@ class RefreshRecruitsJob implements ShouldQueue
         On3PhotoEnricher $photos,
         CacheRepository $cache,
         LoggerInterface $log,
+        SettingsRepositoryInterface $settings,
     ): void {
+        $apiKey = trim((string) $settings->get('ernestdefoe-recruiting.api_key', ''));
+
+        // The key was removed after this job was queued: nothing to fetch with.
+        if ($apiKey === '') {
+            return;
+        }
+
         try {
-            $data = $cfbd->fetchRecruits($this->apiKey, $this->year, $this->team, $this->maxRecruits);
+            $data = $cfbd->fetchRecruits($apiKey, $this->year, $this->team, $this->maxRecruits);
         } catch (\Throwable $e) {
             // Don't overwrite the existing cache envelope with empty
             // data on a CFBD blip — the operator wants the last good
