@@ -385,6 +385,21 @@ jobs:
             s{(<pre.*?</pre>)|\n+}{ defined $1 ? $1 : " " }ges;
           ')
 
+          # 🚨 A rerun of this job must not post the release twice. If one of
+          # the thread's latest posts already opens with this release's
+          # heading, there is nothing left to do here.
+          seen=$(curl -fsS --max-time 20 -G "${FLARUM_FORUM_URL%/}/api/posts" \
+              -H "Authorization: Token ${FLARUM_API_KEY}" \
+              --data-urlencode "filter[discussion]=${FLARUM_DISCUSSION_ID}" \
+              --data-urlencode "sort=-createdAt" --data-urlencode "page[limit]=20" \
+            | jq -r --arg tag "$RELEASE_TAG" '[.data[]? | (.attributes.contentHtml // "") | (capture("^\\s*<h2[^>]*>(?<t>[^<]*)</h2>").t)? | split(" ") | select(index($tag) or index($tag | ltrimstr("v")))] | length' 2>/dev/null) || seen=""
+          if [ -z "$seen" ]; then
+            echo "::warning::Could not read the support discussion to check for an earlier post of $RELEASE_TAG, so posting it."
+          elif [ "$seen" -gt 0 ]; then
+            echo "::notice::$RELEASE_TAG is already in the support discussion, so it is not posted again."
+            exit 0
+          fi
+
           PAYLOAD=$(jq -n \
             --arg content "$CONTENT" \
             --arg did "$FLARUM_DISCUSSION_ID" \
