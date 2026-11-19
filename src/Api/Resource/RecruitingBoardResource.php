@@ -11,7 +11,7 @@ use Flarum\Api\Schema;
 use Tobyz\JsonApiServer\Context;
 
 /**
- * GET /api/recruiting-boards: the configured recruiting class.
+ * GET /api/recruiting-boards/1: the configured recruiting class.
  *
  * A singleton resource (like core's mail-settings): there is one board per
  * forum. The board is public data, cached once for everyone, and the page
@@ -36,25 +36,19 @@ class RecruitingBoardResource extends AbstractResource implements Findable
         return '1';
     }
 
-    public function id(Context $context): ?string
-    {
-        return '1';
-    }
-
     /**
      * Runs before the permission check, so it does no work: the board is
      * loaded when its first field is serialized.
      */
     public function find(string $id, Context $context): ?object
     {
-        return new RecruitingBoard(fn () => $this->boards->load());
+        return $id === '1' ? new RecruitingBoard(fn () => $this->boards->load()) : null;
     }
 
     public function endpoints(): array
     {
         return [
             Endpoint\Show::make()
-                ->route('GET', '/')
                 // viewForum is a global ability: checked without the board,
                 // which ->can() would pass to the gate as a model.
                 ->visible(fn (RecruitingBoard $board, FlarumContext $context) => $context->getActor()->can('viewForum')),

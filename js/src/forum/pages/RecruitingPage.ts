@@ -1,36 +1,8 @@
 import app from 'flarum/forum/app';
 import Page, { IPageAttrs } from 'flarum/common/components/Page';
 import type Mithril from 'mithril';
-
-/** A single recruit row as returned by GET /api/recruiting-boards. */
-interface Recruit {
-  id: number | string | null;
-  name: string;
-  position: string | null;
-  height: string | null;
-  weight: string | null;
-  hometown: string | null;
-  country: string | null;
-  stars: number | null;
-  rating: number | null;
-  ranking: number | null;
-  status: 'committed' | 'undecided';
-  school: string | null;
-  highSchool: string | null;
-  recruitType: string | null;
-  photoUrl: string | null;
-}
-
-/** GET /api/recruiting-boards: the board's JSON:API document. */
-interface BoardDocument {
-  data: {
-    attributes: {
-      recruits: Recruit[];
-      year: number;
-      error: string | null;
-    };
-  };
-}
+import type RecruitingBoard from '../models/RecruitingBoard';
+import type { Recruit } from '../models/RecruitingBoard';
 
 const PAGE_PREFIX = 'ernestdefoe-recruiting.forum.page.';
 
@@ -96,12 +68,12 @@ export default class RecruitingPage extends Page {
   load() {
     this.loading = true;
 
-    app
-      .request<BoardDocument>({ method: 'GET', url: `${app.forum.attribute<string>('apiUrl')}/recruiting-boards` })
-      .then(({ data: { attributes: board } }) => {
+    app.store
+      .find<RecruitingBoard>('recruiting-boards', '1')
+      .then((board) => {
         // The cold cache is being filled by a queued refresh — retry shortly
         // rather than rendering an error, up to a bounded number of times.
-        if (board.error === 'warming_up' && this.coldRetries < MAX_COLD_RETRIES) {
+        if (board.error() === 'warming_up' && this.coldRetries < MAX_COLD_RETRIES) {
           this.coldRetries += 1;
           this.loading = true;
           this.error = null;
@@ -111,9 +83,9 @@ export default class RecruitingPage extends Page {
         }
 
         this.coldRetries = 0;
-        this.recruits = board.recruits;
-        this.year = board.year;
-        this.error = board.error;
+        this.recruits = board.recruits();
+        this.year = board.year();
+        this.error = board.error();
         this.loading = false;
         this.brokenPhotos = new Set(); // reset on fresh data
         m.redraw();

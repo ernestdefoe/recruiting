@@ -48,7 +48,7 @@ return [
         ->default('ernestdefoe-recruiting.widget_title', '')
         ->default('ernestdefoe-recruiting.max_recruits', '25')
         ->default('ernestdefoe-recruiting.cache_minutes', '360')
-        // On3 headshot scraping is on by default (preserves existing
-        // behaviour) but operators can disable all outbound On3 traffic.
+        // On3 headshots are on by default; operators can switch them off
+        // to stop all outbound On3 traffic.
         ->default('ernestdefoe-recruiting.photos_enabled', '1'),
 ];

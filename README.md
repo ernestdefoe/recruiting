@@ -40,7 +40,6 @@ A Flarum 2 extension that pulls live college football recruiting rankings from t
 
 ```bash
 composer require ernestdefoe/recruiting
-php flarum migrate
 php flarum cache:clear
 ```
 
@@ -69,7 +68,7 @@ All settings are found in **Admin → Extensions → FBSFB Recruiting**.
 2. The JS frontend reads the board from the forum's API: `GET /api/recruiting-boards` (a Flarum API resource, gated on the forum's view permission).
 3. The extension reads your admin settings and checks Flarum's cache. If the cached payload is fresh it returns immediately. If it's past the soft TTL it dispatches a background refresh job and returns the cached (stale) data immediately — see [Caching & refresh strategy](#caching--refresh-strategy).
 4. The refresh job (`RefreshRecruitsJob`) proxies a request to `https://api.collegefootballdata.com/recruiting/players?year=…&team=…`, sorts results by national ranking, transforms them into the JSON shape, and writes the new payload back to the cache envelope.
-5. Headshots: if the year's On3 photo map is already cached the recruits get their photos straight away; otherwise a second job (`RefreshPhotosJob`) fetches the map and attaches them (see below). The page itself never waits on CFBD or On3.
+5. Headshots: if the year's On3 photo map is already cached the recruits get their photos straight away; otherwise a second job (`RefreshPhotosJob`) fetches the map and attaches them (see below). With a queue worker the page never waits on CFBD or On3; on the default `sync` driver the one request that queues a refresh waits for it (see [Recommended: run a queue worker](#recommended-run-a-queue-worker)).
 6. Player cards are rendered with national rank, stars, headshot, physical measurements, high school, hometown, and commitment pill.
 7. Client-side filters let users narrow by position, commitment status, or keyword search instantly without a second API call.
 
@@ -77,7 +76,7 @@ All settings are found in **Admin → Extensions → FBSFB Recruiting**.
 
 ## Caching & refresh strategy
 
-The extension uses a **stale-while-revalidate** cache envelope so a CFBD round-trip (≤ 10 s) never blocks the user's request.
+The extension uses a **stale-while-revalidate** cache envelope so a CFBD round-trip (≤ 10 s) is never on a page request when a queue worker runs; on the default `sync` driver only the one request that queues a refresh waits for it.
 
 ### Cache shape
 

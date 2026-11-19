@@ -19,7 +19,7 @@ class CfbdClient
     private const BASE_URL = 'https://api.collegefootballdata.com';
     private const USER_AGENT = 'FBSFB/1.0 (Flarum extension)';
 
-    /** Per-request timeouts (seconds) — match the original client defaults. */
+    /** Per-request timeouts (seconds). */
     private const TIMEOUT = 10;
     private const CONNECT_TIMEOUT = 5;
 

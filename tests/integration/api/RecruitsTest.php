@@ -26,7 +26,7 @@ use Illuminate\Queue\SyncQueue;
 use PHPUnit\Framework\Attributes\Test;
 
 /**
- * GET /api/recruiting-boards: the forum-side proxy to the College Football Data
+ * GET /api/recruiting-boards/1: the forum-side proxy to the College Football Data
  * API, with its cache. No test reaches the network: the extension's HTTP client
  * is swapped for one that answers from a queue and records what was asked.
  */
@@ -95,7 +95,7 @@ class RecruitsTest extends TestCase
     {
         $this->boot();
 
-        $response = $this->send($this->request('GET', '/api/recruiting-boards', $actor ? ['authenticatedAs' => $actor] : []));
+        $response = $this->send($this->request('GET', '/api/recruiting-boards/1', $actor ? ['authenticatedAs' => $actor] : []));
         $json = json_decode((string) $response->getBody(), true);
         $board = $json['data']['attributes'] ?? null;
 
@@ -398,6 +398,14 @@ class RecruitsTest extends TestCase
         [, $body] = $this->recruits();
 
         $this->assertNull($body['data'][0]['photoUrl'], 'photos_enabled is 0, so the photo envelope is not used');
+    }
+
+    #[Test]
+    public function there_is_one_board()
+    {
+        $response = $this->send($this->request('GET', '/api/recruiting-boards/2'));
+
+        $this->assertSame(404, $response->getStatusCode());
     }
 
     #[Test]
