@@ -22,6 +22,9 @@
         "flarum/core": "^2.0",
         "guzzlehttp/guzzle": "^7.0"
     },
+    "conflict": {
+        "ernestdefoe/gridiron-nation": "<2.3.16"
+    },
     "autoload": {
         "psr-4": {
             "Ernestdefoe\\Recruiting\\": "src/"
