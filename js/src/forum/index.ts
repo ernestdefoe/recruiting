@@ -3,10 +3,9 @@ import { extend } from 'flarum/common/extend';
 import IndexSidebar from 'flarum/forum/components/IndexSidebar';
 import LinkButton from 'flarum/common/components/LinkButton';
 
-app.initializers.add('ernestdefoe-recruiting', () => {
-  // Register the /recruiting route.
-  app.routes.recruiting = { path: '/recruiting', component: () => import('./forum/pages/RecruitingPage') };
+export { default as extend } from './extend';
 
+app.initializers.add('ernestdefoe-recruiting', () => {
   // Add a "Recruiting" link to the IndexSidebar nav (Flarum 2's navItems lives
   // on IndexSidebar, not IndexPage).
   extend(IndexSidebar.prototype, 'navItems', function (items) {

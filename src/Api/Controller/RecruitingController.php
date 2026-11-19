@@ -3,16 +3,10 @@
 namespace Ernestdefoe\Recruiting\Api\Controller;
 
 use Ernestdefoe\Recruiting\Job\RefreshRecruitsJob;
-use Ernestdefoe\Recruiting\Service\CfbdClient;
-use Ernestdefoe\Recruiting\Service\On3PhotoEnricher;
 use Flarum\Http\RequestUtil;
 use Flarum\Settings\SettingsRepositoryInterface;
-use Illuminate\Contracts\Bus\Dispatcher as BusDispatcher;
-use Illuminate\Contracts\Cache\LockProvider;
-use Illuminate\Contracts\Cache\LockTimeoutException;
 use Illuminate\Contracts\Cache\Repository as CacheRepository;
 use Illuminate\Contracts\Queue\Queue;
-use Illuminate\Queue\SyncQueue;
 use Laminas\Diactoros\Response\JsonResponse;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
@@ -22,297 +16,127 @@ use Psr\Log\LoggerInterface;
 /**
  * GET /api/cfbd-recruits.
  *
- * Thin orchestrator. Resolves settings, checks the cache envelope,
- * decides whether to serve fresh / serve stale + refresh / fetch
- * inline (first-ever request only). Delegates HTTP + transform to
- * CfbdClient and headshot scraping to On3PhotoEnricher.
+ * Serves the recruiting class from the cache and never calls CFBD or On3
+ * itself: every fetch is RefreshRecruitsJob's (and RefreshPhotosJob's).
+ * This is a custom handler, not an API resource, because the data is a
+ * cached copy of a third-party API, not database records.
  *
  * Cache shape:
  *   $cacheKey -> ['data' => list<recruit>, 'fetched_at' => unix ts]
  *
- *   Hard retention is much longer than the soft TTL (default 7 days
- *   vs. 6 hours) so a string of CFBD outages doesn't blank the
- *   widget — we'd rather show data that's a few days old than the
- *   empty state.
+ *   Kept for RefreshRecruitsJob::RETENTION_SECONDS (7 days), far longer
+ *   than the soft TTL (default 6 hours), so a string of CFBD outages
+ *   doesn't blank the page.
  *
- * Refresh path:
- *   When data is past the soft TTL we dispatch RefreshRecruitsJob
- *   and return the stale data immediately. A short-lived
- *   "refresh-in-flight" cache lock prevents N concurrent workers
- *   from all dispatching the job in the cold-cache stampede.
+ * Paths:
+ *   - fresh: served as is;
+ *   - stale: served as is, and a refresh is queued;
+ *   - cold (nothing cached): a refresh is queued and the frontend is told
+ *     to retry (202 warming_up) until the envelope exists.
  *
- *   On Flarum's default `sync` queue driver the job would run inline,
- *   before the stale data is returned. Under PHP-FPM it is instead run
- *   after the response has been sent (see dispatchRefresh()), so the
- *   visitor never waits on CFBD. With any real driver (`database`,
- *   `redis`, `sqs`) the dispatch returns immediately and the worker
- *   handles the fetch out of band.
+ *   A short "refreshing" cache key (atomic add) makes sure concurrent
+ *   requests queue one refresh, not one each. With a real queue driver the
+ *   push returns at once; on Flarum's default sync driver the job runs
+ *   inside the push, so the cold request is answered with the data.
  */
 class RecruitingController implements RequestHandlerInterface
 {
-    /** Hard cache retention. Stale data is still better than no data. */
-    private const HARD_RETENTION_SECONDS = 7 * 24 * 3600;
-
-    /** Lock window: don't re-dispatch a refresh while another is in flight. */
+    /** Don't queue another refresh while one is in flight. */
     private const REFRESH_LOCK_SECONDS = 90;
-
-    /**
-     * Cold-cache single-flight window. Held while one request does the inline
-     * fetch. Worst case is sequential CFBD (connect 5 + read 10 = 15 s) + On3
-     * (connect 5 + read 12 = 17 s) ≈ 32 s, so a 30 s lock could expire
-     * mid-fetch and let a second request stampede. 60 s comfortably covers the
-     * combined worst case (plus map-building overhead) while still self-healing
-     * within a minute if the holder dies.
-     */
-    private const COLD_LOCK_SECONDS = 60;
-
-    /**
-     * How long a concurrent cold request will block waiting for the
-     * in-flight fetch before giving up and telling the client to retry.
-     * Kept short so PHP-FPM workers aren't tied up for the full fetch.
-     */
-    private const COLD_WAIT_SECONDS = 5;
-
-    /**
-     * How long a failed cold fetch is remembered. Without it, a bad key, an
-     * exhausted quota or a CFBD outage made EVERY visit to the page another
-     * outbound call (each up to 15 s, each spending the free tier's 1,000 a
-     * month), because nothing was cached to serve instead.
-     */
-    private const FAILURE_SECONDS = 300;
 
     public function __construct(
         private SettingsRepositoryInterface $settings,
         private CacheRepository $cache,
         private LoggerInterface $log,
-        private CfbdClient $cfbd,
-        private On3PhotoEnricher $photos,
-        private BusDispatcher $bus,
         private Queue $queue,
     ) {
     }
 
     public function handle(ServerRequestInterface $request): ResponseInterface
     {
-        $actor = RequestUtil::getActor($request);
         // The board is public data, cached once for everyone, and the page and
         // its nav link are shown to guests. Gate it on the forum's own view
         // permission so a forum closed to guests stays closed.
-        $actor->assertCan('viewForum');
+        RequestUtil::getActor($request)->assertCan('viewForum');
 
-        $apiKey = trim((string) $this->settings->get('ernestdefoe-recruiting.api_key', ''));
-        $year = trim((string) $this->settings->get('ernestdefoe-recruiting.year', ''));
-        $team = trim((string) $this->settings->get('ernestdefoe-recruiting.team', ''));
-        $maxRecruits = max(1, min(100, (int) $this->settings->get('ernestdefoe-recruiting.max_recruits', 25)));
-        $softTtl = max(60, (int) $this->settings->get('ernestdefoe-recruiting.cache_minutes', 360) * 60);
+        $apiKey = trim((string) $this->settings->get('ernestdefoe-recruiting.api_key'));
+        $year = trim((string) $this->settings->get('ernestdefoe-recruiting.year'));
+        $year = preg_match('/^\d{4}$/', $year) ? $year : date('Y');
 
-        if (! $apiKey) {
-            return new JsonResponse([
-                'data' => [],
-                'year' => (int) ($year ?: date('Y')),
-                'error' => 'api_key_missing',
-            ]);
+        if ($apiKey === '') {
+            return $this->json([], $year, 'api_key_missing');
         }
 
-        $year = $year !== '' && preg_match('/^\d{4}$/', $year) ? $year : (string) date('Y');
-
+        $team = trim((string) $this->settings->get('ernestdefoe-recruiting.team'));
+        $maxRecruits = max(1, min(100, (int) $this->settings->get('ernestdefoe-recruiting.max_recruits')));
+        $softTtl = max(60, (int) $this->settings->get('ernestdefoe-recruiting.cache_minutes') * 60);
         $cacheKey = 'ernestdefoe-recruiting.'.md5("{$year}|{$team}|{$maxRecruits}");
-        $lockKey = $cacheKey.'.refreshing';
 
         try {
-            $cached = $this->cache->get($cacheKey);
+            $cached = $this->envelope($cacheKey);
 
-            if (! is_array($cached) || ! isset($cached['data'], $cached['fetched_at'])) {
-                // A cold fetch that just failed is not retried on every
-                // visit. Keyed by the API key too, so fixing the key in
-                // the admin panel takes effect at once.
-                $failed = $this->cache->get($this->failureKey($cacheKey, $apiKey));
-                if (is_string($failed) && $failed !== '') {
-                    throw new \RuntimeException($failed);
+            if ($cached !== null) {
+                if (time() - (int) $cached['fetched_at'] > $softTtl) {
+                    $this->queueRefresh($cacheKey, $year, $team, $maxRecruits);
                 }
 
-                // First-ever request for this query: inline fetch is the
-                // only option (we have nothing to serve while a job runs).
-                // Guarded by a single-flight lock so N concurrent cold
-                // requests don't each spawn their own CFBD + On3 round-trip.
-                return $this->serveCold($cacheKey, $apiKey, $year, $team, $maxRecruits);
+                return $this->json($cached['data'], $year);
             }
 
-            $age = time() - (int) $cached['fetched_at'];
-            $isStale = $age > $softTtl;
-
-            if ($isStale && $this->cache->add($lockKey, '1', self::REFRESH_LOCK_SECONDS)) {
-                // Stale, and no other worker has already taken the lock —
-                // dispatch a refresh and serve the stale data immediately.
-                $this->dispatchRefresh(new RefreshRecruitsJob(
-                    cacheKey:         $cacheKey,
-                    year:             $year,
-                    team:             $team,
-                    maxRecruits:      $maxRecruits,
-                    retentionSeconds: self::HARD_RETENTION_SECONDS,
-                ));
+            // Cold. A fetch that just failed is not retried on every visit;
+            // the failure is keyed by the API key too, so fixing the key in
+            // the admin panel takes effect at once.
+            $failureKey = RefreshRecruitsJob::failureKey($cacheKey, $apiKey);
+            if (! $this->cache->has($failureKey)) {
+                $this->queueRefresh($cacheKey, $year, $team, $maxRecruits);
             }
 
-            return $this->jsonRecruits($cached['data'], $year);
-        } catch (\RuntimeException $e) {
-            // Stable error codes from CfbdClient → pass through verbatim.
-            return new JsonResponse([
-                'data' => [],
-                'year' => (int) $year,
-                'error' => $e->getMessage(),
-            ]);
+            return $this->serveCold($cacheKey, $failureKey, $year);
         } catch (\Throwable $e) {
             $this->log->error('[recruiting] RecruitingController: '.$e->getMessage(), ['exception' => $e]);
 
-            return new JsonResponse([
-                'data' => [],
-                'year' => (int) $year,
-                'error' => 'unexpected_error',
-            ]);
+            return $this->json([], $year, 'unexpected_error');
         }
     }
 
     /**
-     * Cold-cache path with single-flight protection. At most one request
-     * runs the inline CFBD + On3 fetch for a given query; concurrent callers
-     * wait briefly for it to populate the cache and serve that, or return a
-     * 202 "warming_up" so the frontend retries — never a stampede.
-     *
-     * Prefers an atomic cache lock (auto-releases on crash, lets waiters
-     * block). Falls back to an add()-based mutex on the rare store that
-     * doesn't provide atomic locks.
+     * After the cold path queued its refresh: the data if the job already
+     * ran (sync driver), its error code if it failed, else a 202 so the
+     * frontend retries shortly.
      */
-    private function serveCold(string $cacheKey, string $apiKey, string $year, string $team, int $maxRecruits): ResponseInterface
+    private function serveCold(string $cacheKey, string $failureKey, string $year): ResponseInterface
     {
-        $store = $this->cache->getStore();
-
-        if ($store instanceof LockProvider) {
-            $lock = $this->cache->lock('ernestdefoe-recruiting.cold.'.$cacheKey, self::COLD_LOCK_SECONDS);
-
-            try {
-                // Block until it's our turn (or the fetch is taking too long).
-                $lock->block(self::COLD_WAIT_SECONDS);
-            } catch (LockTimeoutException $e) {
-                // Another request is mid-fetch and slow — serve whatever it
-                // has produced so far, else ask the client to retry.
-                return $this->serveFreshOrRetry($cacheKey, $year);
-            }
-
-            try {
-                // The previous holder may have already populated the cache.
-                $cached = $this->cache->get($cacheKey);
-                if (is_array($cached) && isset($cached['data'], $cached['fetched_at'])) {
-                    return $this->jsonRecruits($cached['data'], $year);
-                }
-
-                return $this->serveInline($cacheKey, $apiKey, $year, $team, $maxRecruits);
-            } finally {
-                $lock->release();
-            }
+        $cached = $this->envelope($cacheKey);
+        if ($cached !== null) {
+            return $this->json($cached['data'], $year);
         }
 
-        // Fallback single-flight for stores without atomic locks.
-        $mutexKey = $cacheKey.'.cold';
-        if (! $this->cache->add($mutexKey, '1', self::COLD_LOCK_SECONDS)) {
-            return $this->serveFreshOrRetry($cacheKey, $year);
+        $failed = $this->cache->get($failureKey);
+        if (is_string($failed) && $failed !== '') {
+            return $this->json([], $year, $failed);
         }
 
-        try {
-            return $this->serveInline($cacheKey, $apiKey, $year, $team, $maxRecruits);
-        } finally {
-            $this->cache->forget($mutexKey);
+        return new JsonResponse(['data' => [], 'year' => (int) $year, 'error' => 'warming_up'], 202);
+    }
+
+    /** Queue one refresh for this query, unless one is already in flight. */
+    private function queueRefresh(string $cacheKey, string $year, string $team, int $maxRecruits): void
+    {
+        if ($this->cache->add($cacheKey.'.refreshing', '1', self::REFRESH_LOCK_SECONDS)) {
+            $this->queue->push(new RefreshRecruitsJob($cacheKey, $year, $team, $maxRecruits));
         }
     }
 
-    /**
-     * Re-read the cache (the in-flight cold fetch may have finished) and
-     * serve it if present, otherwise return a 202 telling the frontend to
-     * retry shortly rather than launching a competing fetch.
-     */
-    private function serveFreshOrRetry(string $cacheKey, string $year): ResponseInterface
+    /** @return array{data: list<array<string, mixed>>, fetched_at: int}|null */
+    private function envelope(string $cacheKey): ?array
     {
         $cached = $this->cache->get($cacheKey);
-        if (is_array($cached) && isset($cached['data'], $cached['fetched_at'])) {
-            return $this->jsonRecruits($cached['data'], $year);
-        }
 
-        return new JsonResponse([
-            'data' => [],
-            'year' => (int) $year,
-            'error' => 'warming_up',
-        ], 202);
+        return is_array($cached) && isset($cached['data'], $cached['fetched_at']) ? $cached : null;
     }
 
-    /**
-     * First-ever request (or a hard cache eviction) — fetch CFBD
-     * inline, populate the envelope, return the result. This is the
-     * only path that pays the API round-trip on the request thread.
-     */
-    private function serveInline(string $cacheKey, string $apiKey, string $year, string $team, int $maxRecruits): ResponseInterface
+    private function json(array $data, string $year, ?string $error = null): JsonResponse
     {
-        try {
-            $data = $this->cfbd->fetchRecruits($apiKey, $year, $team, $maxRecruits);
-        } catch (\RuntimeException $e) {
-            $this->cache->put($this->failureKey($cacheKey, $apiKey), $e->getMessage(), self::FAILURE_SECONDS);
-
-            throw $e;
-        }
-
-        // Pre-enrich before storing so every subsequent serve-from-cache
-        // path (including the stale-while-revalidate branch above) reads
-        // ready-to-render data and never blocks on the On3 scrape.
-        $data = $this->photos->enrich($data, $year);
-
-        $this->cache->put($cacheKey, [
-            'data' => $data,
-            'fetched_at' => time(),
-        ], self::HARD_RETENTION_SECONDS);
-
-        return $this->jsonRecruits($data, $year);
-    }
-
-    /**
-     * Frame the JSON response. Photo enrichment already happened at
-     * cache-write time (RefreshRecruitsJob or serveInline), so we serve
-     * the cached payload verbatim — no inline On3 fetch on the request
-     * path.
-     */
-    private function jsonRecruits(array $data, string $year): JsonResponse
-    {
-        return new JsonResponse([
-            'data' => $data,
-            'year' => (int) $year,
-        ]);
-    }
-
-    /**
-     * Queue the refresh. On the sync driver under PHP-FPM, run it only after
-     * the response has gone out: Flarum has no "after response" hook, so a
-     * shutdown function flushes the response with fastcgi_finish_request()
-     * and then runs the job. Elsewhere (a real queue, or a SAPI that can't
-     * finish the request early) it is dispatched as before.
-     */
-    private function dispatchRefresh(RefreshRecruitsJob $job): void
-    {
-        if (! $this->queue instanceof SyncQueue || PHP_SAPI !== 'fpm-fcgi' || ! function_exists('fastcgi_finish_request')) {
-            $this->bus->dispatch($job);
-
-            return;
-        }
-
-        register_shutdown_function(function () use ($job): void {
-            fastcgi_finish_request();
-
-            try {
-                $this->bus->dispatch($job);
-            } catch (\Throwable $e) {
-                $this->log->error('[recruiting] deferred refresh failed: '.$e->getMessage(), ['exception' => $e]);
-            }
-        });
-    }
-
-    private function failureKey(string $cacheKey, string $apiKey): string
-    {
-        return $cacheKey.'.failed.'.md5($apiKey);
+        return new JsonResponse(['data' => $data, 'year' => (int) $year] + ($error !== null ? ['error' => $error] : []));
     }
 }

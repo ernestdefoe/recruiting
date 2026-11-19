@@ -4,6 +4,7 @@ namespace Ernestdefoe\Recruiting\Service;
 
 use Flarum\Settings\SettingsRepositoryInterface;
 use GuzzleHttp\ClientInterface;
+use GuzzleHttp\Exception\GuzzleException;
 use Illuminate\Contracts\Cache\Repository as CacheRepository;
 use Psr\Log\LoggerInterface;
 
@@ -17,11 +18,8 @@ use Psr\Log\LoggerInterface;
  *   with a profile href (`/rivals/{slug}-{id}/`) and an on3static.com
  *   image. We build a `name-slug → image-URL` map and cache it for
  *   24 hours; an empty map (failed scrape) is NOT cached so the next
- *   request retries.
- *
- * Carved out of the original RecruitingController so the scrape +
- * parse + match steps can evolve independently (and so the
- * controller stops being responsible for HTML regex).
+ *   refresh retries. The fetch runs only in RefreshPhotosJob, never
+ *   in a web request.
  */
 class On3PhotoEnricher
 {
@@ -62,55 +60,64 @@ class On3PhotoEnricher
     }
 
     /**
-     * Attach photoUrl to every recruit by looking up the name-slug
-     * in the cached On3 image map.
+     * Whether On3 photo enrichment is on. Operators can switch it off to
+     * stop all outbound On3 traffic; recruits then render with star-tier
+     * initials avatars.
+     */
+    public function enabled(): bool
+    {
+        return (bool) $this->settings->get('ernestdefoe-recruiting.photos_enabled');
+    }
+
+    /**
+     * The year's cached image map, or null when it isn't cached. Never
+     * fetches, so it is safe anywhere.
+     *
+     * @return array<string, string>|null
+     */
+    public function cachedMap(string $year): ?array
+    {
+        $cached = $this->cache->get($this->mapKey($year));
+
+        return is_array($cached) ? $cached : null;
+    }
+
+    /**
+     * Fetch the rankings page and cache its image map for 24 h. Outbound
+     * HTTP (up to ~17 s), so it runs only in RefreshPhotosJob. An empty map
+     * (failed scrape) is not cached, so the next refresh tries again.
+     *
+     * @return array<string, string>
+     */
+    public function refreshMap(string $year): array
+    {
+        $map = $this->build($year);
+        if ($map !== []) {
+            $this->cache->put($this->mapKey($year), $map, self::CACHE_TTL);
+        }
+
+        return $map;
+    }
+
+    /**
+     * Attach photoUrl to every recruit by looking up its name-slug.
      *
      * @param list<array<string, mixed>> $recruits
+     * @param array<string, string> $map
      * @return list<array<string, mixed>>
      */
-    public function enrich(array $recruits, string $year): array
+    public function apply(array $recruits, array $map): array
     {
-        // Operators can disable the On3 scrape entirely (it's an outbound,
-        // unauthenticated request to a third-party site). When off, recruits
-        // render with star-tier initials avatars instead of headshots.
-        if (! $this->enabled()) {
-            return $recruits;
-        }
-
-        $imageMap = $this->imageMap($year);
-        if (empty($imageMap)) {
-            return $recruits;
-        }
-
-        return array_map(function ($r) use ($imageMap) {
-            $slug = $this->nameToSlug((string) ($r['name'] ?? ''));
-            $r['photoUrl'] = $imageMap[$slug] ?? null;
+        return array_map(function ($r) use ($map) {
+            $r['photoUrl'] = $map[$this->nameToSlug((string) ($r['name'] ?? ''))] ?? null;
 
             return $r;
         }, $recruits);
     }
 
-    /**
-     * Fetch the year's image map, cached for 24 h. Empty maps are
-     * NOT cached — a failed scrape retries on the next call.
-     *
-     * @return array<string, string>
-     */
-    private function imageMap(string $year): array
+    private function mapKey(string $year): string
     {
-        $cacheKey = "ernestdefoe-recruiting.on3map.football.{$year}";
-
-        $cached = $this->cache->get($cacheKey);
-        if (is_array($cached)) {
-            return $cached;
-        }
-
-        $map = $this->build($year);
-        if (! empty($map)) {
-            $this->cache->put($cacheKey, $map, self::CACHE_TTL);
-        }
-
-        return $map;
+        return "ernestdefoe-recruiting.on3map.football.{$year}";
     }
 
     /**
@@ -133,7 +140,7 @@ class On3PhotoEnricher
                     'Accept' => 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
                 ],
             ]);
-        } catch (\Throwable $e) {
+        } catch (GuzzleException $e) {
             $this->log->warning('[recruiting] On3 rankings fetch failed', ['exception' => $e]);
 
             return [];
@@ -241,16 +248,6 @@ class On3PhotoEnricher
         $slug = preg_replace('/[^a-z0-9]+/', '-', $slug);
 
         return trim($slug, '-');
-    }
-
-    /**
-     * Whether On3 photo enrichment is enabled. Defaults to on (preserving
-     * existing behaviour) but operators can switch it off to stop all
-     * outbound On3 traffic.
-     */
-    private function enabled(): bool
-    {
-        return (bool) $this->settings->get('ernestdefoe-recruiting.photos_enabled', '1');
     }
 
     /**

@@ -69,7 +69,7 @@ All settings are found in **Admin → Extensions → FBSFB Recruiting**.
 2. The JS frontend calls the internal API route `GET /api/cfbd-recruits`.
 3. The PHP controller reads your admin settings and checks Flarum's cache. If the cached payload is fresh it returns immediately. If it's past the soft TTL it dispatches a background refresh job and returns the cached (stale) data immediately — see [Caching & refresh strategy](#caching--refresh-strategy).
 4. The refresh job (`RefreshRecruitsJob`) proxies a request to `https://api.collegefootballdata.com/recruiting/players?year=…&team=…`, sorts results by national ranking, transforms them into the JSON shape, and writes the new payload back to the cache envelope.
-5. Recruit records are enriched with On3 headshots (see below) and returned to the client.
+5. Headshots: if the year's On3 photo map is already cached the recruits get their photos straight away; otherwise a second job (`RefreshPhotosJob`) fetches the map and attaches them (see below). The page itself never waits on CFBD or On3.
 6. Player cards are rendered with national rank, stars, headshot, physical measurements, high school, hometown, and commitment pill.
 7. Client-side filters let users narrow by position, commitment status, or keyword search instantly without a second API call.
 
@@ -95,11 +95,11 @@ ernestdefoe-recruiting.<hash> → { data: [...], fetched_at: <unix ts> }
 | Fresh cache (within soft TTL) | Return cached data. No network. |
 | Stale cache, no refresh in flight | Dispatch `RefreshRecruitsJob`, return cached data immediately. A 90 s "refreshing" lock prevents N concurrent requests from dispatching N jobs in a stampede. |
 | Stale cache, refresh already in flight | Return cached data immediately. The in-flight job will repopulate the cache for the next visitor. |
-| No cache at all (first request ever, or `cache:clear`) | Inline CFBD fetch. This is the ONE request that pays the API round-trip on the request thread. |
+| No cache at all (first request ever, or `cache:clear`) | Queue `RefreshRecruitsJob` and answer `202 warming_up`; the page retries every few seconds until the data is cached. A failed fetch (bad key, CFBD down) is remembered for 5 minutes and shown instead of retried on every visit. |
 
 ### Recommended: run a queue worker
 
-By default Flarum 2 ships with the **`sync` queue driver**, which means `RefreshRecruitsJob::dispatch()` runs inline in the request — defeating the point of the stale-while-revalidate pattern (one unlucky stale request per soft-TTL window still pays the CFBD cost).
+By default Flarum 2 ships with the **`sync` queue driver**, which runs every queued job inside the request that queues it. The extension works on it, but the one visitor whose request queues a refresh (the first ever, or the first after the soft TTL) waits for the CFBD fetch, and for the On3 page when the photo map needs refreshing.
 
 For zero-wait refresh, configure a real queue driver in `config.php`:
 
@@ -115,7 +115,7 @@ For zero-wait refresh, configure a real queue driver in `config.php`:
 php flarum queue:work --tries=3 --timeout=60
 ```
 
-With a real driver the dispatch returns in <1 ms and the worker handles the CFBD fetch in the background. Every request — even the first one after the soft TTL expires — gets cached data instantly.
+With a real driver the push returns in <1 ms and the worker handles the CFBD and On3 fetches in the background. Every request after the first gets cached data instantly.
 
 ---
 
@@ -127,11 +127,11 @@ Headshots are sourced from **[On3](https://www.on3.com/)**, which maintains phot
 
 On3's football rankings page (`on3.com/rivals/rankings/player/football/{year}/`) is fully server-rendered HTML containing 150+ ranked recruits, each with a profile link and headshot image URL embedded directly in the markup.
 
-On the first API call after the cache is empty the extension:
+When the photo map is not cached, `RefreshPhotosJob` (a queued job, never the page request):
 
 1. Fetches the On3 rankings page for the configured class year (one HTTP request).
 2. Parses the HTML to build a **name → image URL** map using positional matching between profile hrefs (`/rivals/jared-curtis-159433/`) and `on3static.com` image paths.
-3. Caches the map for **24 hours** — subsequent requests read from cache with zero external HTTP calls.
+3. Caches the map for **24 hours** — later refreshes use it with no external HTTP call.
 4. Matches each CFBD recruit to the map by normalised name slug (e.g. `"Jared Curtis"` → `"jared-curtis"`).
 
 ### Fallback avatars

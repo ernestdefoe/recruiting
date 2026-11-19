@@ -3,7 +3,7 @@
 namespace Ernestdefoe\Recruiting\Service;
 
 use GuzzleHttp\ClientInterface;
-use GuzzleHttp\Exception\RequestException;
+use GuzzleHttp\Exception\GuzzleException;
 
 /**
  * Thin client over the College Football Data API recruiting/players
@@ -11,11 +11,8 @@ use GuzzleHttp\Exception\RequestException;
  * shape into the internal recruit array the rest of the extension
  * uses.
  *
- * Carved out of the original RecruitingController so the controller
- * stays a thin orchestrator and the HTTP + transform layer is
- * testable in isolation. The ClientInterface is container-managed
- * (bound in RecruitingServiceProvider); per-request timeouts are set
- * below so the shared client can also serve the On3 enricher.
+ * The ClientInterface is given to this class alone by a contextual
+ * binding in RecruitingServiceProvider; timeouts are set per request.
  */
 class CfbdClient
 {
@@ -34,9 +31,8 @@ class CfbdClient
      * Fetch + transform a single recruiting class.
      *
      * @return list<array<string, mixed>>
-     * @throws \RuntimeException with stable codes — caller maps to JSON
-     *   error responses:
-     *     cfbd_unreachable, invalid_api_key, cfbd_error_<status>
+     * @throws CfbdException with a stable code as its message:
+     *   cfbd_unreachable, invalid_api_key, cfbd_error_<status>
      */
     public function fetchRecruits(string $apiKey, string $year, string $team, int $maxRecruits): array
     {
@@ -57,17 +53,19 @@ class CfbdClient
                 'connect_timeout' => self::CONNECT_TIMEOUT,
                 'http_errors' => false,
             ]);
-        } catch (RequestException $e) {
-            throw new \RuntimeException('cfbd_unreachable');
+        } catch (GuzzleException $e) {
+            // Connection failures and timeouts included (ConnectException
+            // is not a RequestException).
+            throw new CfbdException('cfbd_unreachable', 0, $e);
         }
 
         $status = $response->getStatusCode();
 
         if ($status === 401 || $status === 403) {
-            throw new \RuntimeException('invalid_api_key');
+            throw new CfbdException('invalid_api_key');
         }
         if ($status !== 200) {
-            throw new \RuntimeException('cfbd_error_'.$status);
+            throw new CfbdException('cfbd_error_'.$status);
         }
 
         $raw = json_decode((string) $response->getBody(), true);

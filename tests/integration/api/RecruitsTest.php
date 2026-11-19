@@ -2,7 +2,10 @@
 
 namespace Ernestdefoe\Recruiting\Tests\integration\api;
 
+use Ernestdefoe\Recruiting\Job\RefreshPhotosJob;
 use Ernestdefoe\Recruiting\Job\RefreshRecruitsJob;
+use Ernestdefoe\Recruiting\Service\CfbdClient;
+use Ernestdefoe\Recruiting\Service\On3PhotoEnricher;
 use Flarum\Settings\SettingsRepositoryInterface;
 use Flarum\Testing\integration\RetrievesAuthorizedUsers;
 use Flarum\Testing\integration\TestCase;
@@ -13,14 +16,18 @@ use GuzzleHttp\ClientInterface;
 use GuzzleHttp\Handler\MockHandler;
 use GuzzleHttp\HandlerStack;
 use GuzzleHttp\Middleware;
+use GuzzleHttp\Exception\ConnectException;
+use GuzzleHttp\Psr7\Request;
 use GuzzleHttp\Psr7\Response;
 use Illuminate\Contracts\Cache\Repository;
+use Illuminate\Contracts\Queue\Queue;
+use Illuminate\Queue\SyncQueue;
 use PHPUnit\Framework\Attributes\Test;
 
 /**
  * GET /api/cfbd-recruits: the forum-side proxy to the College Football Data
- * API, with its cache. No test reaches the network: the shared HTTP client is
- * swapped for one that answers from a queue and records what was asked.
+ * API, with its cache. No test reaches the network: the extension's HTTP client
+ * is swapped for one that answers from a queue and records what was asked.
  */
 class RecruitsTest extends TestCase
 {
@@ -53,7 +60,34 @@ class RecruitsTest extends TestCase
         $stack = HandlerStack::create($this->responses);
         $stack->push(Middleware::history($this->sent));
 
-        $this->app()->getContainer()->instance(ClientInterface::class, new Client(['handler' => $stack, 'http_errors' => false]));
+        $client = new Client(['handler' => $stack, 'http_errors' => false]);
+        $this->app()->getContainer()
+            ->when([CfbdClient::class, On3PhotoEnricher::class])
+            ->needs(ClientInterface::class)
+            ->give(fn () => $client);
+    }
+
+    /** A queue that records pushed jobs instead of running them. */
+    private function holdQueue(): \ArrayObject
+    {
+        $pushed = new \ArrayObject();
+        $this->app()->getContainer()->instance(Queue::class, new class($pushed) extends SyncQueue {
+            public function __construct(private \ArrayObject $pushed)
+            {
+            }
+
+            public function push($job, $data = '', $queue = null)
+            {
+                $this->pushed->append($job);
+            }
+        });
+
+        return $pushed;
+    }
+
+    private function runJob(object $job): void
+    {
+        $this->app()->getContainer()->call([$job, 'handle']);
     }
 
     private function recruits(?int $actor = 2): array
@@ -200,12 +234,12 @@ class RecruitsTest extends TestCase
         $this->cfbd([$this->player(9, 1)]);
         $this->boot();
 
-        $payload = serialize(new RefreshRecruitsJob($this->cacheKey(), '2027', '', 25, 3600));
+        $payload = serialize(new RefreshRecruitsJob($this->cacheKey(), '2027', '', 25));
         $this->assertStringNotContainsString('OLDKEY', $payload, 'Queue payloads (jobs table, Redis) must not hold the API key');
 
         // The admin changes the key while the job waits in the queue.
         $this->app()->getContainer()->make(SettingsRepositoryInterface::class)->set('ernestdefoe-recruiting.api_key', 'NEWKEY');
-        $this->app()->getContainer()->call([unserialize($payload), 'handle']);
+        $this->runJob(unserialize($payload));
 
         $this->assertSame('Bearer NEWKEY', $this->sent[0]['request']->getHeaderLine('Authorization'));
         $this->assertSame(9, $this->app()->getContainer()->make(Repository::class)->get($this->cacheKey())['data'][0]['id']);
@@ -255,6 +289,86 @@ class RecruitsTest extends TestCase
         $this->assertCount(1, $this->sent);
         $this->assertCount(1, $this->responses, 'The queued On3 page was never asked for');
         $this->assertSame('api.collegefootballdata.com', $this->sent[0]['request']->getUri()->getHost());
+    }
+
+    #[Test]
+    public function the_http_client_is_not_bound_for_anyone_else()
+    {
+        $this->app();
+
+        $this->assertFalse(
+            $this->app()->getContainer()->bound(ClientInterface::class),
+            'Core and other extensions resolving ClientInterface must not get ours'
+        );
+    }
+
+    #[Test]
+    public function a_cold_request_makes_no_outbound_call_and_photos_are_a_separate_job()
+    {
+        $this->setting('ernestdefoe-recruiting.api_key', 'KEY');
+        $this->setting('ernestdefoe-recruiting.photos_enabled', '1');
+        $this->cfbd([$this->player(1, 1, ['name' => 'Jared Curtis'])]);
+        $this->responses->append(new Response(200, [], '<a href="/rivals/jared-curtis-123456/"><img src="https://on3static.com/uploads/assets/1/2/3.jpg"></a>'));
+        $this->boot();
+        $pushed = $this->holdQueue();
+
+        [$status, $body] = $this->recruits();
+
+        $this->assertSame(202, $status);
+        $this->assertSame('warming_up', $body['error']);
+        $this->assertCount(0, $this->sent, 'The request itself calls neither CFBD nor On3');
+        $this->assertCount(1, $pushed);
+        $this->assertInstanceOf(RefreshRecruitsJob::class, $pushed[0]);
+
+        [$status] = $this->recruits();
+        $this->assertSame(202, $status);
+        $this->assertCount(1, $pushed, 'A refresh already in flight is not queued twice');
+
+        $this->runJob($pushed[0]);
+        $this->assertCount(1, $this->sent, 'The recruits job fetches CFBD only');
+        $this->assertSame('api.collegefootballdata.com', $this->sent[0]['request']->getUri()->getHost());
+        $this->assertInstanceOf(RefreshPhotosJob::class, $pushed[1]);
+
+        [$status, $body] = $this->recruits();
+        $this->assertSame(200, $status);
+        $this->assertNull($body['data'][0]['photoUrl'], 'Served without photos until the photo job runs');
+        $fetchedAt = $this->app()->getContainer()->make(Repository::class)->get($this->cacheKey())['fetched_at'];
+
+        $this->runJob($pushed[1]);
+        $this->assertSame('www.on3.com', $this->sent[1]['request']->getUri()->getHost());
+
+        [, $body] = $this->recruits();
+        $this->assertSame('https://on3static.com/uploads/assets/1/2/3.jpg', $body['data'][0]['photoUrl']);
+        $this->assertSame($fetchedAt, $this->app()->getContainer()->make(Repository::class)->get($this->cacheKey())['fetched_at']);
+    }
+
+    #[Test]
+    public function a_cached_photo_map_is_used_without_another_job()
+    {
+        $this->setting('ernestdefoe-recruiting.api_key', 'KEY');
+        $this->setting('ernestdefoe-recruiting.photos_enabled', '1');
+        $this->cfbd([$this->player(1, 1, ['name' => 'Jared Curtis'])]);
+        $this->boot();
+        $pushed = $this->holdQueue();
+        $this->app()->getContainer()->make(Repository::class)->put('ernestdefoe-recruiting.on3map.football.2027', ['jared-curtis' => 'https://on3static.com/x.jpg'], 3600);
+
+        $this->runJob(new RefreshRecruitsJob($this->cacheKey(), '2027', '', 25));
+
+        $this->assertCount(1, $this->sent);
+        $this->assertCount(0, $pushed);
+        $this->assertSame('https://on3static.com/x.jpg', $this->app()->getContainer()->make(Repository::class)->get($this->cacheKey())['data'][0]['photoUrl']);
+    }
+
+    #[Test]
+    public function an_unreachable_cfbd_is_reported_as_such()
+    {
+        $this->setting('ernestdefoe-recruiting.api_key', 'KEY');
+        $this->responses->append(new ConnectException('timed out', new Request('GET', 'https://api.collegefootballdata.com')));
+
+        [$status, $body] = $this->recruits();
+
+        $this->assertSame(200, $status);
+        $this->assertSame('cfbd_unreachable', $body['error'], 'A connection timeout is not an unexpected_error');
     }
 
     #[Test]

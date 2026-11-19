@@ -86,9 +86,9 @@ export default class RecruitingPage extends Page {
     super.oncreate(vnode);
     // Fetch here (not oninit) so the component is guaranteed to be mounted
     // before the first redraw triggered by a resolved fetch.
-    this.fetch();
+    this.load();
     // Recruiting data changes rarely — refresh every 30 minutes.
-    this.timer = setInterval(() => this.fetch(), 30 * 60_000);
+    this.timer = setInterval(() => this.load(), 30 * 60_000);
   }
 
   onremove(vnode: Mithril.VnodeDOM<IPageAttrs, this>) {
@@ -99,24 +99,19 @@ export default class RecruitingPage extends Page {
 
   // ── Data ────────────────────────────────────────────────────────────────────
 
-  fetch() {
+  load() {
     this.loading = true;
 
-    // Build the API URL from the forum base URL so it works regardless of a
-    // subdirectory install. (`apiUrl` is not a real forum attribute in
-    // Flarum 2 — the old code silently fell back to '/api'.)
-    const base = (app.forum.attribute<string>('baseUrl') || '').replace(/\/$/, '');
-
     app
-      .request<RecruitsResponse>({ method: 'GET', url: `${base}/api/cfbd-recruits` })
+      .request<RecruitsResponse>({ method: 'GET', url: `${app.forum.attribute<string>('apiUrl')}/cfbd-recruits` })
       .then((data) => {
-        // Cold cache is being warmed by another request — retry shortly
+        // The cold cache is being filled by a queued refresh — retry shortly
         // rather than rendering an error, up to a bounded number of times.
         if (data.error === 'warming_up' && this.coldRetries < MAX_COLD_RETRIES) {
           this.coldRetries += 1;
           this.loading = true;
           this.error = null;
-          this.coldRetryTimer = setTimeout(() => this.fetch(), 3000);
+          this.coldRetryTimer = setTimeout(() => this.load(), 3000);
           m.redraw();
           return;
         }
@@ -300,12 +295,7 @@ export default class RecruitingPage extends Page {
 
   viewCard(r: Recruit): Mithril.Children {
     const starsStr = this.stars(r.stars);
-    const inits = this.initials(r.name);
-    const physicals = [r.height, r.weight].filter(Boolean).join(' · ');
     const photoKey = r.id || r.name;
-
-    // Show initials if there is no photoUrl, or if the image previously failed.
-    const showInitials = !r.photoUrl || this.brokenPhotos.has(photoKey);
 
     return m('.GNR-card', { key: photoKey }, [
       // Top bar — national rank + stars + numerical rating
@@ -315,12 +305,29 @@ export default class RecruitingPage extends Page {
         r.rating ? m('.GNR-ratingBadge', r.rating.toFixed(4)) : null,
       ]),
 
+      this.viewPhoto(r, photoKey),
+      this.viewBody(r),
+
+      // Footer — commitment pill
+      m('.GNR-footer', [
+        r.status === 'committed'
+          ? m('span.GNR-commit.GNR-commit--committed', [m('i.fa-solid.fa-circle-check'), ` ${r.school || trans('card_committed')}`])
+          : m('span.GNR-commit.GNR-commit--undecided', [m('i.fa-regular.fa-circle'), ' ' + trans('card_undecided')]),
+      ]),
+    ]);
+  }
+
+  viewPhoto(r: Recruit, photoKey: string | number): Mithril.Children {
+    // Show initials if there is no photoUrl, or if the image previously failed.
+    const showInitials = !r.photoUrl || this.brokenPhotos.has(photoKey);
+
+    return (
       // Photo — On3 scrape when available; star-coloured initials as fallback.
       // onerror updates component state and triggers a Mithril redraw so the
       // broken image is replaced via the vdom rather than raw DOM mutation.
       m('.GNR-photoWrap', { 'data-stars': r.stars || 0 }, [
         showInitials
-          ? m('.GNR-initials', inits)
+          ? m('.GNR-initials', this.initials(r.name))
           : m('img.GNR-photo', {
               src: r.photoUrl,
               alt: r.name,
@@ -330,8 +337,14 @@ export default class RecruitingPage extends Page {
                 m.redraw();
               },
             }),
-      ]),
+      ])
+    );
+  }
 
+  viewBody(r: Recruit): Mithril.Children {
+    const physicals = [r.height, r.weight].filter(Boolean).join(' · ');
+
+    return (
       // Body — name, position, measurements, school info
       m('.GNR-body', [
         m('.GNR-name', r.name),
@@ -347,14 +360,7 @@ export default class RecruitingPage extends Page {
           : null,
 
         r.recruitType && r.recruitType !== 'HighSchool' ? m('span.GNR-typeBadge', r.recruitType.replace(/([A-Z])/g, ' $1').trim()) : null,
-      ]),
-
-      // Footer — commitment pill
-      m('.GNR-footer', [
-        r.status === 'committed'
-          ? m('span.GNR-commit.GNR-commit--committed', [m('i.fa-solid.fa-circle-check'), ` ${r.school || trans('card_committed')}`])
-          : m('span.GNR-commit.GNR-commit--undecided', [m('i.fa-regular.fa-circle'), ' ' + trans('card_undecided')]),
-      ]),
-    ]);
+      ])
+    );
   }
 }
