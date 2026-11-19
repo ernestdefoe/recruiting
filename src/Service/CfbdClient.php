@@ -85,7 +85,7 @@ class CfbdClient
      * Project a raw CFBD player object into the extension's stable
      * shape. Defensive against missing fields — CFBD has historically
      * shipped player rows with partial data and we'd rather render
-     * "—" than crash the widget.
+     * "—" than crash the page.
      */
     private function transform(array $r): array
     {
@@ -102,13 +102,10 @@ class CfbdClient
 
         return [
             'id' => $r['id'] ?? null,
-            'athleteId' => isset($r['athleteId']) ? (int) $r['athleteId'] : null,
             'name' => $r['name'] ?? 'Unknown',
             'position' => isset($r['position']) ? strtoupper((string) $r['position']) : null,
             'height' => $height,
             'weight' => isset($r['weight']) ? ((int) $r['weight']).' lbs' : null,
-            'city' => $city,
-            'state' => $state,
             'hometown' => $hometown,
             'country' => isset($r['country']) && $r['country'] !== 'USA' ? (string) $r['country'] : null,
             'stars' => isset($r['stars']) ? (int) $r['stars'] : null,

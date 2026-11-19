@@ -179,8 +179,8 @@ class RecruitsTest extends TestCase
         $this->assertSame('Bearer KEY', $request->getHeaderLine('Authorization'));
 
         $this->assertSame([
-            'id' => 1, 'athleteId' => 1001, 'name' => 'Player 1', 'position' => 'QB', 'height' => "6'3\"",
-            'weight' => '210 lbs', 'city' => 'Austin', 'state' => 'TX', 'hometown' => 'Austin, TX', 'country' => 'Canada',
+            'id' => 1, 'name' => 'Player 1', 'position' => 'QB', 'height' => "6'3\"",
+            'weight' => '210 lbs', 'hometown' => 'Austin, TX', 'country' => 'Canada',
             'stars' => 5, 'rating' => 0.9987, 'ranking' => 1, 'status' => 'undecided', 'school' => null,
             'highSchool' => 'Westlake', 'recruitType' => 'HighSchool', 'photoUrl' => null,
         ], $body['data'][0]);
@@ -357,6 +357,40 @@ class RecruitsTest extends TestCase
         $this->assertCount(1, $this->sent);
         $this->assertCount(0, $pushed);
         $this->assertSame('https://on3static.com/x.jpg', $this->app()->getContainer()->make(Repository::class)->get($this->cacheKey())['data'][0]['photoUrl']);
+    }
+
+    #[Test]
+    public function a_failed_on3_scrape_is_not_retried_on_every_refresh()
+    {
+        $this->setting('ernestdefoe-recruiting.api_key', 'KEY');
+        $this->setting('ernestdefoe-recruiting.photos_enabled', '1');
+        $this->cfbd([$this->player(1, 1)]);
+        $this->cfbd([$this->player(1, 1)]);
+        $this->responses->append(new Response(503, [], 'down'));
+        $this->boot();
+        $pushed = $this->holdQueue();
+
+        $this->runJob(new RefreshRecruitsJob($this->cacheKey(), '2027', '', 25));
+        $this->runJob($pushed[0]);
+        $this->runJob(new RefreshRecruitsJob($this->cacheKey(), '2027', '', 25));
+
+        $this->assertCount(3, $this->sent, 'CFBD, On3 (failed), CFBD');
+        $this->assertCount(1, $pushed, 'The failed scrape is remembered, so no second photo job');
+    }
+
+    #[Test]
+    public function served_data_is_cached_by_the_browser_and_errors_are_not()
+    {
+        $this->setting('ernestdefoe-recruiting.api_key', 'KEY');
+        $this->cfbd([$this->player(1, 1)]);
+        $this->boot();
+
+        $response = $this->send($this->request('GET', '/api/cfbd-recruits'));
+        $this->assertSame('private, max-age=60', $response->getHeaderLine('Cache-Control'));
+
+        $this->app()->getContainer()->make(SettingsRepositoryInterface::class)->set('ernestdefoe-recruiting.api_key', '');
+        $response = $this->send($this->request('GET', '/api/cfbd-recruits'));
+        $this->assertStringNotContainsString('max-age=60', $response->getHeaderLine('Cache-Control'));
     }
 
     #[Test]

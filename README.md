@@ -57,7 +57,7 @@ All settings are found in **Admin → Extensions → FBSFB Recruiting**.
 | **API Key** | Your CFBD bearer token | *(required)* |
 | **Recruiting Year** | Class year to display (e.g. `2026`) | Current calendar year |
 | **Team Filter** | Show only recruits committed to a specific team (e.g. `Alabama`). Leave blank for national rankings. | *(blank — national)* |
-| **Page / Widget Title** | Heading shown above the widget and on `/recruiting`. Leave blank for "Top Recruits". | *(blank)* |
+| **Page Title** | Heading shown on `/recruiting`. Leave blank for "Top Recruits". | *(blank)* |
 | **Max Recruits** | How many recruits to display (1–100) | `25` |
 | **Cache Duration** | Soft TTL for CFBD responses (minutes). After this expires the next request serves the cached data and dispatches a background refresh — see [Caching & refresh strategy](#caching--refresh-strategy). | `360` (6 hours) |
 
@@ -85,7 +85,7 @@ The extension uses a **stale-while-revalidate** cache envelope so a CFBD round-t
 ernestdefoe-recruiting.<hash> → { data: [...], fetched_at: <unix ts> }
 ```
 
-- **Hard retention:** 7 days. Stale data is still served if every refresh attempt fails — better than a blank widget during a CFBD outage.
+- **Hard retention:** 7 days. Stale data is still served if every refresh attempt fails — better than a blank page during a CFBD outage.
 - **Soft TTL:** the **Cache Duration** setting (default 6 hours). Determines when a request is treated as stale and triggers a background refresh.
 
 ### Refresh paths
@@ -127,11 +127,11 @@ Headshots are sourced from **[On3](https://www.on3.com/)**, which maintains phot
 
 On3's football rankings page (`on3.com/rivals/rankings/player/football/{year}/`) is fully server-rendered HTML containing 150+ ranked recruits, each with a profile link and headshot image URL embedded directly in the markup.
 
-When the photo map is not cached, `RefreshPhotosJob` (a queued job, never the page request):
+When the photo map is not cached, `RefreshPhotosJob` (a queued job; inline only on the `sync` driver):
 
 1. Fetches the On3 rankings page for the configured class year (one HTTP request).
 2. Parses the HTML to build a **name → image URL** map using positional matching between profile hrefs (`/rivals/jared-curtis-159433/`) and `on3static.com` image paths.
-3. Caches the map for **24 hours** — later refreshes use it with no external HTTP call.
+3. Caches the map for **24 hours** (a failed scrape for 1 hour, so an outage isn't retried on every refresh) — later refreshes use it with no external HTTP call.
 4. Matches each CFBD recruit to the map by normalised name slug (e.g. `"Jared Curtis"` → `"jared-curtis"`).
 
 ### Fallback avatars

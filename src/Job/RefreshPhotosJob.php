@@ -9,8 +9,8 @@ use Illuminate\Contracts\Cache\Repository as CacheRepository;
 /**
  * Fetches the year's On3 image map and attaches headshots to the cached
  * recruits. Queued by RefreshRecruitsJob when the map isn't cached, so
- * the On3 scrape (up to ~17 s) runs on its own, after the CFBD data is
- * already being served.
+ * the On3 scrape (up to ~17 s) is a job of its own, run after the CFBD
+ * data is cached: by the queue worker, or inline on the sync driver.
  */
 class RefreshPhotosJob extends AbstractJob
 {

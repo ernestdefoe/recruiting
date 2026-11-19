@@ -119,11 +119,21 @@ class RecruitingController implements RequestHandlerInterface
         return new JsonResponse(['data' => [], 'year' => (int) $year, 'error' => 'warming_up'], 202);
     }
 
-    /** Queue one refresh for this query, unless one is already in flight. */
+    /**
+     * Queue one refresh for this query, unless one is already in flight. On
+     * the sync driver the job runs right here, so a failure is logged and
+     * never costs the visitor the data that is already cached.
+     */
     private function queueRefresh(string $cacheKey, string $year, string $team, int $maxRecruits): void
     {
-        if ($this->cache->add($cacheKey.'.refreshing', '1', self::REFRESH_LOCK_SECONDS)) {
+        if (! $this->cache->add($cacheKey.'.refreshing', '1', self::REFRESH_LOCK_SECONDS)) {
+            return;
+        }
+
+        try {
             $this->queue->push(new RefreshRecruitsJob($cacheKey, $year, $team, $maxRecruits));
+        } catch (\Throwable $e) {
+            $this->log->error('[recruiting] queueing a refresh failed: '.$e->getMessage(), ['exception' => $e]);
         }
     }
 
@@ -137,6 +147,12 @@ class RecruitingController implements RequestHandlerInterface
 
     private function json(array $data, string $year, ?string $error = null): JsonResponse
     {
-        return new JsonResponse(['data' => $data, 'year' => (int) $year] + ($error !== null ? ['error' => $error] : []));
+        if ($error !== null) {
+            return new JsonResponse(['data' => $data, 'year' => (int) $year, 'error' => $error]);
+        }
+
+        // Per browser only: whether a visitor may see the board depends on
+        // the forum's permissions. Errors aren't cached, so a fixed key shows.
+        return new JsonResponse(['data' => $data, 'year' => (int) $year], 200, ['Cache-Control' => 'private, max-age=60']);
     }
 }

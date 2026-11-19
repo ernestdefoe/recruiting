@@ -5,13 +5,10 @@ import type Mithril from 'mithril';
 /** A single recruit row as returned by GET /api/cfbd-recruits. */
 interface Recruit {
   id: number | string | null;
-  athleteId: number | null;
   name: string;
   position: string | null;
   height: string | null;
   weight: string | null;
-  city: string | null;
-  state: string | null;
   hometown: string | null;
   country: string | null;
   stars: number | null;
@@ -75,13 +72,6 @@ export default class RecruitingPage extends Page {
   private coldRetryTimer: ReturnType<typeof setTimeout> | null = null;
   private coldRetries: number = 0;
 
-  oninit(vnode: Mithril.Vnode<IPageAttrs, this>) {
-    super.oninit(vnode);
-
-    // Force the two-panel (no sidebar) layout used by full-width pages.
-    this.bodyClass = 'App--recruiting';
-  }
-
   oncreate(vnode: Mithril.VnodeDOM<IPageAttrs, this>) {
     super.oncreate(vnode);
     // Fetch here (not oninit) so the component is guaranteed to be mounted
@@ -133,7 +123,7 @@ export default class RecruitingPage extends Page {
 
   // ── Helpers ─────────────────────────────────────────────────────────────────
 
-  /** Unique sorted position list derived from loaded data — no side-effects. */
+  /** Unique positions in ranking order, derived from loaded data — no side-effects. */
   positions(): string[] {
     const seen = new Set<string>();
     const result: string[] = [];

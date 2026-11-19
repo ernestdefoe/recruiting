@@ -17,15 +17,17 @@ use Psr\Log\LoggerInterface;
  *   once. The page is server-rendered HTML with ~150 players, each
  *   with a profile href (`/rivals/{slug}-{id}/`) and an on3static.com
  *   image. We build a `name-slug → image-URL` map and cache it for
- *   24 hours; an empty map (failed scrape) is NOT cached so the next
- *   refresh retries. The fetch runs only in RefreshPhotosJob, never
- *   in a web request.
+ *   24 hours; an empty map (failed scrape) is cached for an hour so the
+ *   refresh retries. The fetch runs only in RefreshPhotosJob: in the
+ *   queue worker, or inline in the request that queued it on Flarum's
+ *   sync driver.
  */
 class On3PhotoEnricher
 {
     private const RANKINGS_URL = 'https://www.on3.com/rivals/rankings/player/football/';
     private const STATIC_HOST = 'https://on3static.com';
     private const CACHE_TTL = 24 * 3600;
+    private const FAILURE_TTL = 3600;
 
     /** Per-request timeouts (seconds) for the rankings fetch. */
     private const TIMEOUT = 12;
@@ -84,17 +86,16 @@ class On3PhotoEnricher
 
     /**
      * Fetch the rankings page and cache its image map for 24 h. Outbound
-     * HTTP (up to ~17 s), so it runs only in RefreshPhotosJob. An empty map
-     * (failed scrape) is not cached, so the next refresh tries again.
+     * HTTP (up to ~17 s), so it runs only in RefreshPhotosJob. A failed
+     * scrape is remembered for an hour (an empty map), so an On3 outage is
+     * not retried on every refresh.
      *
      * @return array<string, string>
      */
     public function refreshMap(string $year): array
     {
         $map = $this->build($year);
-        if ($map !== []) {
-            $this->cache->put($this->mapKey($year), $map, self::CACHE_TTL);
-        }
+        $this->cache->put($this->mapKey($year), $map, $map === [] ? self::FAILURE_TTL : self::CACHE_TTL);
 
         return $map;
     }
