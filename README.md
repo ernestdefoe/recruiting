@@ -66,8 +66,8 @@ All settings are found in **Admin → Extensions → FBSFB Recruiting**.
 ## How it works
 
 1. A visitor (guests included, unless the forum is closed to guests) navigates to `/recruiting` (or clicks the **Recruiting** link in the sidebar nav).
-2. The JS frontend calls the internal API route `GET /api/cfbd-recruits`.
-3. The PHP controller reads your admin settings and checks Flarum's cache. If the cached payload is fresh it returns immediately. If it's past the soft TTL it dispatches a background refresh job and returns the cached (stale) data immediately — see [Caching & refresh strategy](#caching--refresh-strategy).
+2. The JS frontend reads the board from the forum's API: `GET /api/recruiting-boards` (a Flarum API resource, gated on the forum's view permission).
+3. The extension reads your admin settings and checks Flarum's cache. If the cached payload is fresh it returns immediately. If it's past the soft TTL it dispatches a background refresh job and returns the cached (stale) data immediately — see [Caching & refresh strategy](#caching--refresh-strategy).
 4. The refresh job (`RefreshRecruitsJob`) proxies a request to `https://api.collegefootballdata.com/recruiting/players?year=…&team=…`, sorts results by national ranking, transforms them into the JSON shape, and writes the new payload back to the cache envelope.
 5. Headshots: if the year's On3 photo map is already cached the recruits get their photos straight away; otherwise a second job (`RefreshPhotosJob`) fetches the map and attaches them (see below). The page itself never waits on CFBD or On3.
 6. Player cards are rendered with national rank, stars, headshot, physical measurements, high school, hometown, and commitment pill.
@@ -95,7 +95,7 @@ ernestdefoe-recruiting.<hash> → { data: [...], fetched_at: <unix ts> }
 | Fresh cache (within soft TTL) | Return cached data. No network. |
 | Stale cache, no refresh in flight | Dispatch `RefreshRecruitsJob`, return cached data immediately. A 90 s "refreshing" lock prevents N concurrent requests from dispatching N jobs in a stampede. |
 | Stale cache, refresh already in flight | Return cached data immediately. The in-flight job will repopulate the cache for the next visitor. |
-| No cache at all (first request ever, or `cache:clear`) | Queue `RefreshRecruitsJob` and answer `202 warming_up`; the page retries every few seconds until the data is cached. A failed fetch (bad key, CFBD down) is remembered for 5 minutes and shown instead of retried on every visit. |
+| No cache at all (first request ever, or `cache:clear`) | Queue `RefreshRecruitsJob` and answer with the error `warming_up`; the page retries every few seconds until the data is cached. A failed fetch (bad key, CFBD down) is remembered for 5 minutes and shown instead of retried on every visit. |
 
 ### Recommended: run a queue worker
 

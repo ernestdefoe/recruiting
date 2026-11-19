@@ -13,7 +13,7 @@ use Psr\Log\LoggerInterface;
 
 /**
  * Pulls a recruiting class from CFBD and writes the cache envelope
- * (data + fetched_at) that RecruitingController serves.
+ * (data + fetched_at) that RecruitingBoards serves.
  *
  * Headshots come only from an already-cached On3 map here. When the map
  * isn't cached, the envelope is written without photos and
@@ -71,7 +71,7 @@ class RefreshRecruitsJob extends AbstractJob
             $log->warning('[recruiting] CFBD fetch failed: '.$e->getMessage(), ['year' => $this->year, 'team' => $this->team]);
 
             // The last good envelope keeps being served. The error code is
-            // what a cold page shows, and the controller's refresh gate is
+            // what a cold page shows, and RecruitingBoards' refresh gate is
             // held so an outage is retried every few minutes, not per view.
             $cache->put(self::failureKey($this->cacheKey, $apiKey), $e->getMessage(), self::FAILURE_SECONDS);
             $cache->put($this->cacheKey.'.refreshing', '1', self::FAILURE_SECONDS);

@@ -1,6 +1,6 @@
 <?php
 
-use Ernestdefoe\Recruiting\Api\Controller\RecruitingController;
+use Ernestdefoe\Recruiting\Api\Resource\RecruitingBoardResource;
 use Ernestdefoe\Recruiting\RecruitingServiceProvider;
 use Flarum\Extend;
 
@@ -28,11 +28,8 @@ return [
 
     new Extend\Locales(__DIR__.'/locale'),
 
-    // ── API routes ───────────────────────────────────────────────────────────
-    // One read-only route serving a cached copy of a third-party API (CFBD),
-    // not database records, so a plain handler rather than an API resource.
-    (new Extend\Routes('api'))
-        ->get('/cfbd-recruits', 'cfbd.recruits', RecruitingController::class),
+    // ── API ──────────────────────────────────────────────────────────────────
+    new Extend\ApiResource(RecruitingBoardResource::class),
 
     // ── Settings ─────────────────────────────────────────────────────────────
     // Settings UI is registered with Extend.Admin in js/src/admin/extend.ts.

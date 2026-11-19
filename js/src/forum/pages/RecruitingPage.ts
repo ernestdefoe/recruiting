@@ -2,7 +2,7 @@ import app from 'flarum/forum/app';
 import Page, { IPageAttrs } from 'flarum/common/components/Page';
 import type Mithril from 'mithril';
 
-/** A single recruit row as returned by GET /api/cfbd-recruits. */
+/** A single recruit row as returned by GET /api/recruiting-boards. */
 interface Recruit {
   id: number | string | null;
   name: string;
@@ -21,11 +21,15 @@ interface Recruit {
   photoUrl: string | null;
 }
 
-/** Envelope shape of the /api/cfbd-recruits response. */
-interface RecruitsResponse {
-  data?: Recruit[];
-  year?: number | null;
-  error?: string | null;
+/** GET /api/recruiting-boards: the board's JSON:API document. */
+interface BoardDocument {
+  data: {
+    attributes: {
+      recruits: Recruit[];
+      year: number;
+      error: string | null;
+    };
+  };
 }
 
 const PAGE_PREFIX = 'ernestdefoe-recruiting.forum.page.';
@@ -39,14 +43,14 @@ function trans(suffix: string, params: Record<string, unknown> = {}): string {
   return app.translator.trans(PAGE_PREFIX + suffix, params, true);
 }
 
-/** Max consecutive 202 "warming_up" retries before showing an error. */
+/** Max consecutive "warming_up" retries before showing an error. */
 const MAX_COLD_RETRIES = 8;
 
 /**
  * RecruitingPage — /recruiting
  *
  * Full page showing college football recruiting rankings pulled from
- * the CFBD API via /api/cfbd-recruits.
+ * the CFBD API via /api/recruiting-boards.
  *
  * Features:
  *  - Responsive card grid (auto-fill, 220 px min per card)
@@ -93,11 +97,11 @@ export default class RecruitingPage extends Page {
     this.loading = true;
 
     app
-      .request<RecruitsResponse>({ method: 'GET', url: `${app.forum.attribute<string>('apiUrl')}/cfbd-recruits` })
-      .then((data) => {
+      .request<BoardDocument>({ method: 'GET', url: `${app.forum.attribute<string>('apiUrl')}/recruiting-boards` })
+      .then(({ data: { attributes: board } }) => {
         // The cold cache is being filled by a queued refresh — retry shortly
         // rather than rendering an error, up to a bounded number of times.
-        if (data.error === 'warming_up' && this.coldRetries < MAX_COLD_RETRIES) {
+        if (board.error === 'warming_up' && this.coldRetries < MAX_COLD_RETRIES) {
           this.coldRetries += 1;
           this.loading = true;
           this.error = null;
@@ -107,9 +111,9 @@ export default class RecruitingPage extends Page {
         }
 
         this.coldRetries = 0;
-        this.recruits = data.data || [];
-        this.year = data.year || null;
-        this.error = data.error || null;
+        this.recruits = board.recruits;
+        this.year = board.year;
+        this.error = board.error;
         this.loading = false;
         this.brokenPhotos = new Set(); // reset on fresh data
         m.redraw();

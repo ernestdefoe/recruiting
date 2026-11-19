@@ -6,6 +6,7 @@ use Ernestdefoe\Recruiting\Job\RefreshPhotosJob;
 use Ernestdefoe\Recruiting\Job\RefreshRecruitsJob;
 use Ernestdefoe\Recruiting\Service\CfbdClient;
 use Ernestdefoe\Recruiting\Service\On3PhotoEnricher;
+use Ernestdefoe\Recruiting\Service\RecruitingBoards;
 use Flarum\Settings\SettingsRepositoryInterface;
 use Flarum\Testing\integration\RetrievesAuthorizedUsers;
 use Flarum\Testing\integration\TestCase;
@@ -25,7 +26,7 @@ use Illuminate\Queue\SyncQueue;
 use PHPUnit\Framework\Attributes\Test;
 
 /**
- * GET /api/cfbd-recruits: the forum-side proxy to the College Football Data
+ * GET /api/recruiting-boards: the forum-side proxy to the College Football Data
  * API, with its cache. No test reaches the network: the extension's HTTP client
  * is swapped for one that answers from a queue and records what was asked.
  */
@@ -94,9 +95,15 @@ class RecruitsTest extends TestCase
     {
         $this->boot();
 
-        $response = $this->send($this->request('GET', '/api/cfbd-recruits', $actor ? ['authenticatedAs' => $actor] : []));
+        $response = $this->send($this->request('GET', '/api/recruiting-boards', $actor ? ['authenticatedAs' => $actor] : []));
+        $json = json_decode((string) $response->getBody(), true);
+        $board = $json['data']['attributes'] ?? null;
 
-        return [$response->getStatusCode(), json_decode((string) $response->getBody(), true)];
+        if ($board === null) {
+            return [$response->getStatusCode(), $json];
+        }
+
+        return [$response->getStatusCode(), ['data' => $board['recruits'], 'year' => $board['year']] + ($board['error'] !== null ? ['error' => $board['error']] : [])];
     }
 
     private function cfbd(array $players, int $status = 200): void
@@ -104,9 +111,9 @@ class RecruitsTest extends TestCase
         $this->responses->append(new Response($status, ['Content-Type' => 'application/json'], json_encode($players)));
     }
 
-    private function cacheKey(string $team = '', int $max = 25): string
+    private function cacheKey(bool $photos = false): string
     {
-        return 'ernestdefoe-recruiting.'.md5("2027|{$team}|{$max}");
+        return RecruitingBoards::cacheKey('2027', '', 25, $photos);
     }
 
     private function player(int $id, int $ranking, array $extra = []): array
@@ -314,14 +321,14 @@ class RecruitsTest extends TestCase
 
         [$status, $body] = $this->recruits();
 
-        $this->assertSame(202, $status);
+        $this->assertSame(200, $status);
         $this->assertSame('warming_up', $body['error']);
         $this->assertCount(0, $this->sent, 'The request itself calls neither CFBD nor On3');
         $this->assertCount(1, $pushed);
         $this->assertInstanceOf(RefreshRecruitsJob::class, $pushed[0]);
 
-        [$status] = $this->recruits();
-        $this->assertSame(202, $status);
+        [, $body] = $this->recruits();
+        $this->assertSame('warming_up', $body['error']);
         $this->assertCount(1, $pushed, 'A refresh already in flight is not queued twice');
 
         $this->runJob($pushed[0]);
@@ -332,14 +339,14 @@ class RecruitsTest extends TestCase
         [$status, $body] = $this->recruits();
         $this->assertSame(200, $status);
         $this->assertNull($body['data'][0]['photoUrl'], 'Served without photos until the photo job runs');
-        $fetchedAt = $this->app()->getContainer()->make(Repository::class)->get($this->cacheKey())['fetched_at'];
+        $fetchedAt = $this->app()->getContainer()->make(Repository::class)->get($this->cacheKey(true))['fetched_at'];
 
         $this->runJob($pushed[1]);
         $this->assertSame('www.on3.com', $this->sent[1]['request']->getUri()->getHost());
 
         [, $body] = $this->recruits();
         $this->assertSame('https://on3static.com/uploads/assets/1/2/3.jpg', $body['data'][0]['photoUrl']);
-        $this->assertSame($fetchedAt, $this->app()->getContainer()->make(Repository::class)->get($this->cacheKey())['fetched_at']);
+        $this->assertSame($fetchedAt, $this->app()->getContainer()->make(Repository::class)->get($this->cacheKey(true))['fetched_at']);
     }
 
     #[Test]
@@ -352,11 +359,11 @@ class RecruitsTest extends TestCase
         $pushed = $this->holdQueue();
         $this->app()->getContainer()->make(Repository::class)->put('ernestdefoe-recruiting.on3map.football.2027', ['jared-curtis' => 'https://on3static.com/x.jpg'], 3600);
 
-        $this->runJob(new RefreshRecruitsJob($this->cacheKey(), '2027', '', 25));
+        $this->runJob(new RefreshRecruitsJob($this->cacheKey(true), '2027', '', 25));
 
         $this->assertCount(1, $this->sent);
         $this->assertCount(0, $pushed);
-        $this->assertSame('https://on3static.com/x.jpg', $this->app()->getContainer()->make(Repository::class)->get($this->cacheKey())['data'][0]['photoUrl']);
+        $this->assertSame('https://on3static.com/x.jpg', $this->app()->getContainer()->make(Repository::class)->get($this->cacheKey(true))['data'][0]['photoUrl']);
     }
 
     #[Test]
@@ -379,18 +386,18 @@ class RecruitsTest extends TestCase
     }
 
     #[Test]
-    public function served_data_is_cached_by_the_browser_and_errors_are_not()
+    public function switching_photos_off_stops_serving_cached_headshots_at_once()
     {
         $this->setting('ernestdefoe-recruiting.api_key', 'KEY');
         $this->cfbd([$this->player(1, 1)]);
-        $this->boot();
+        $this->app()->getContainer()->make(Repository::class)->put($this->cacheKey(true), [
+            'data' => [['id' => 1, 'name' => 'Player 1', 'photoUrl' => 'https://on3static.com/x.jpg']],
+            'fetched_at' => time(),
+        ], 3600);
 
-        $response = $this->send($this->request('GET', '/api/cfbd-recruits'));
-        $this->assertSame('private, max-age=60', $response->getHeaderLine('Cache-Control'));
+        [, $body] = $this->recruits();
 
-        $this->app()->getContainer()->make(SettingsRepositoryInterface::class)->set('ernestdefoe-recruiting.api_key', '');
-        $response = $this->send($this->request('GET', '/api/cfbd-recruits'));
-        $this->assertStringNotContainsString('max-age=60', $response->getHeaderLine('Cache-Control'));
+        $this->assertNull($body['data'][0]['photoUrl'], 'photos_enabled is 0, so the photo envelope is not used');
     }
 
     #[Test]

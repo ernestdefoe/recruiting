@@ -1,6 +1,5 @@
 js/node_modules/
 js/coverage-ts/
-js/dist/**/*.js.map
 vendor/
 .DS_Store
 .phpunit.result.cache
